@@ -122,6 +122,7 @@ const LiarsDice = () => {
     setGameLog(prevLog => [...prevLog, { id: Date.now(), message: entry }]);
   }, []);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const computerTurn = () => {
     const currentPlayer = players[currentPlayerIndex];
     if (currentPlayer.isHuman) {
@@ -265,7 +266,7 @@ const LiarsDice = () => {
         newSocket.disconnect();
       }
     };
-  }, [socketUrl]);
+  }, [socketUrl, addToGameLog]);
 
   useEffect(() => {
     if (gameMode === 'singlePlayer' && gameStatus === 'playing' && !players[currentPlayerIndex]?.isHuman) {
