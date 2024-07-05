@@ -68,8 +68,9 @@ const WaitingRoom: React.FC<{ roomCode: string; players: Array<{id: string; name
   );
 };
 
-const JoinGame: React.FC<{ onJoin: (code: string) => void; onCancel: () => void }> = ({ onJoin, onCancel }) => {
+const JoinGame: React.FC<{ onJoin: (code: string, name: string) => void; onCancel: () => void }> = ({ onJoin, onCancel }) => {
   const [code, setCode] = useState('');
+  const [name, setName] = useState('');
 
   return (
     <div className="flex flex-col items-center justify-center h-screen">
@@ -81,8 +82,15 @@ const JoinGame: React.FC<{ onJoin: (code: string) => void; onCancel: () => void 
         placeholder="Enter game code"
         className="mb-4"
       />
+      <Input 
+        type="text" 
+        value={name} 
+        onChange={(e) => setName(e.target.value)} 
+        placeholder="Enter your name"
+        className="mb-4"
+      />
       <div className="space-x-4">
-        <Button onClick={() => onJoin(code)}>Join</Button>
+        <Button onClick={() => onJoin(code, name)} disabled={!code || !name}>Join</Button>
         <Button onClick={onCancel} variant="outline">Cancel</Button>
       </div>
     </div>
@@ -106,6 +114,7 @@ const LiarsDice = () => {
   const [gameLog, setGameLog] = useState<Array<{id: number; message: string}>>([]);
   const [winner, setWinner] = useState<{id: string; name: string} | null>(null);
   const [lastBidPlayerId, setLastBidPlayerId] = useState<string | null>(null);
+  const [playerName, setPlayerName] = useState<string>('');
 
   const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
 
@@ -200,10 +209,6 @@ const LiarsDice = () => {
       }))
     ];
 
-    // console log the number of players and the newPlayers array
-    console.log('# of players ' + playerCount);
-    console.log('New Players ' + newPlayers);
-
     setPlayers(newPlayers);
     setGameStatus('playing');
     startNewRound();
@@ -211,11 +216,13 @@ const LiarsDice = () => {
 
   const handleSelectMultiplayer = () => {
     setGameMode('multiplayer');
+    const name = prompt("Enter your name:") || "Player";
+    setPlayerName(name);
     if (socket) {
-      socket.emit('createRoom', (response: { roomCode: string, playerId: string }) => {
+      socket.emit('createRoom', { playerName: name }, (response: { roomCode: string, playerId: string }) => {
         setRoomCode(response.roomCode);
         setPlayerId(response.playerId);
-        setPlayers([{ id: response.playerId, name: 'You', dice: [], diceCount: TOTAL_DICE, isHuman: true }]);
+        setPlayers([{ id: response.playerId, name: name, dice: [], diceCount: TOTAL_DICE, isHuman: true }]);
       });
     }
   };
@@ -224,13 +231,14 @@ const LiarsDice = () => {
     setGameMode('joinGame');
   };
 
-  const handleJoinGame = (code: string) => {
+  const handleJoinGame = (code: string, name: string) => {
     if (socket) {
-      socket.emit('joinRoom', { roomCode: code, playerName: 'Player' }, (response: { success: boolean, playerId: string, players: any[], message?: string }) => {
+      socket.emit('joinRoom', { roomCode: code, playerName: name }, (response: { success: boolean, playerId: string, players: any[], message?: string }) => {
         if (response.success) {
           setRoomCode(code);
           setPlayerId(response.playerId);
           setPlayers(response.players);
+          setPlayerName(name);
           setGameMode('multiplayer');
         } else {
           alert(response.message || 'Failed to join game');

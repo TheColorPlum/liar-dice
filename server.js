@@ -31,11 +31,11 @@ function rollDice(count) {
 io.on('connection', (socket) => {
   console.log('A user connected');
 
-  socket.on('createRoom', (callback) => {
+  socket.on('createRoom', ({ playerName }, callback) => {
     try {
       const roomCode = generateRoomCode();
       rooms.set(roomCode, { 
-        players: [{ id: socket.id, name: 'Host', dice: [], diceCount: TOTAL_DICE, isHuman: true }],
+        players: [{ id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true }],
         gameState: 'waiting',
         currentPlayerIndex: 0,
         currentBid: null
