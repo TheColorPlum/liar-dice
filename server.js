@@ -30,8 +30,10 @@ function rollDice(count) {
 
 io.on('connection', (socket) => {
   console.log('A user connected');
+  console.log(`New connection: ${socket.id}`);
 
   socket.on('createRoom', ({ playerName }, callback) => {
+    console.log(`Creating room for player: ${playerName}`);
     try {
       const roomCode = generateRoomCode();
       rooms.set(roomCode, { 
@@ -49,15 +51,18 @@ io.on('connection', (socket) => {
   });
 
   socket.on('joinRoom', ({ roomCode, playerName }, callback) => {
+    console.log(`Player ${playerName} attempting to join room ${roomCode}`);
     try {
       const room = rooms.get(roomCode);
       if (room && room.gameState === 'waiting') {
         const newPlayer = { id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true };
         room.players.push(newPlayer);
         socket.join(roomCode);
+        console.log(`Player ${playerName} joined room ${roomCode}. Total players: ${room.players.length}`);
         io.to(roomCode).emit('playerJoined', newPlayer);
         callback({ success: true, playerId: socket.id, players: room.players });
       } else {
+        console.log(`Failed to join room ${roomCode}. Room state: ${room ? room.gameState : 'not found'}`);
         callback({ success: false, message: 'Room not found or game already started' });
       }
     } catch (error) {
@@ -87,23 +92,31 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('placeBid', ({ roomCode, bid }) => {
+  socket.on('placeBid', ({ roomCode, bid }, callback) => {
+    console.log(`Received bid from room ${roomCode}: ${bid.quantity} ${bid.value}'s`);
     try {
       const room = rooms.get(roomCode);
       if (room && room.gameState === 'playing') {
         room.currentBid = bid;
-        const currentPlayer = room.players[room.currentPlayerIndex];
-        room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
-        io.to(roomCode).emit('bidPlaced', { 
+        const currentPlayerIndex = room.players.findIndex(p => p.id === socket.id);
+        const currentPlayer = room.players[currentPlayerIndex];
+        room.currentPlayerIndex = (currentPlayerIndex + 1) % room.players.length;
+        
+        console.log(`Broadcasting bidPlaced event to room ${roomCode}. Next player index: ${room.currentPlayerIndex}`);
+        io.in(roomCode).emit('bidPlaced', { 
           bid, 
           nextPlayerIndex: room.currentPlayerIndex,
           playerName: currentPlayer.name,
           playerId: currentPlayer.id
         });
+        callback({ success: true });
+      } else {
+        console.log(`Invalid bid placement. Room: ${roomCode}, State: ${room ? room.gameState : 'not found'}`);
+        callback({ success: false, error: 'Invalid game state' });
       }
     } catch (error) {
       console.error('Error in placeBid:', error);
-      io.to(roomCode).emit('error', 'Failed to place bid');
+      callback({ success: false, error: error.message });
     }
   });
 
@@ -169,7 +182,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected');
+    console.log(`User disconnected: ${socket.id}`);
     for (const [roomCode, room] of rooms.entries()) {
       const playerIndex = room.players.findIndex(p => p.id === socket.id);
       if (playerIndex !== -1) {

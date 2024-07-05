@@ -118,8 +118,77 @@ const LiarsDice = () => {
 
   const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
 
+  const addToGameLog = useCallback((entry: string) => {
+    setGameLog(prevLog => [...prevLog, { id: Date.now(), message: entry }]);
+  }, []);
+
+  const computerTurn = () => {
+    const currentPlayer = players[currentPlayerIndex];
+    if (currentPlayer.isHuman) {
+      console.error("Computer turn called for human player");
+      return;
+    }
+    console.log(`Computer ${currentPlayer.name}'s turn`);
+    const ownDice = currentPlayer.dice;
+    const totalDice = players.reduce((sum, player) => sum + player.diceCount, 0);
+    
+    let newBid;
+    if (!currentBid) {
+      const mostCommonValue = [...Array(6)].map((_, i) => 
+        ownDice.filter(d => d === i + 1 || d === 1).length
+      ).indexOf(Math.max(...[...Array(6)].map((_, i) => 
+        ownDice.filter(d => d === i + 1 || d === 1).length
+      ))) + 1;
+      
+      newBid = { 
+        quantity: Math.max(1, Math.floor(ownDice.filter(d => d === mostCommonValue || d === 1).length * 1.5)), 
+        value: mostCommonValue 
+      };
+    } else {
+      const ownCount = ownDice.filter(die => die === currentBid.value || die === 1).length;
+      const estimatedTotal = Math.round(ownCount * (totalDice / currentPlayer.diceCount));
+      const confidenceThreshold = 0.7;
+
+      if (estimatedTotal < currentBid.quantity * confidenceThreshold) {
+        console.log("Computer decides to challenge");
+        challenge();
+        return;
+      } else {
+        let attempts = 0;
+        do {
+          let newQuantity = currentBid.quantity;
+          let newValue = currentBid.value;
+
+          if (Math.random() < 0.7) {
+            newQuantity++;
+          } else {
+            newValue = Math.min(newValue + 1, DICE_SIDES);
+            if (newValue === currentBid.value) newQuantity++;
+          }
+
+          newBid = { quantity: newQuantity, value: newValue };
+          attempts++;
+          if (attempts > 10) break;  // Prevent infinite loop
+        } while (!isValidBid(newBid));
+      }
+    }
+    
+    console.log(`Computer places bid: ${newBid.quantity} ${newBid.value}`);
+    setCurrentBid(newBid);
+    addToGameLog(`${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`);
+    const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
+    setCurrentPlayerIndex(nextPlayerIndex);
+    
+    if (!players[nextPlayerIndex].isHuman) {
+      setTimeout(() => computerTurn(), 1000);
+    }
+  };
+
   useEffect(() => {
-    const newSocket = io(socketUrl);
+    const newSocket = io(socketUrl, {
+      transports: ['websocket'],
+      upgrade: false,
+    });
 
     newSocket.on('connect', () => {
       setConnectionError(null);
@@ -144,14 +213,24 @@ const LiarsDice = () => {
     });
 
     newSocket.on('bidPlaced', ({ bid, nextPlayerIndex, playerName, playerId }) => {
-      setCurrentBid(bid);
-      setCurrentPlayerIndex(nextPlayerIndex);
-      if (playerId !== lastBidPlayerId) {
-        const logMessage = `${playerName} bid ${bid.quantity} ${bid.value}'s`;
-        addToGameLog(logMessage);
-        setLastAction(logMessage);
+      console.log(`Received bidPlaced event. Bid: ${bid.quantity} ${bid.value}, Next player index: ${nextPlayerIndex}`);
+      setCurrentBid(prevBid => {
+        console.log(`Updating current bid from ${JSON.stringify(prevBid)} to ${JSON.stringify(bid)}`);
+        return bid;
+      });
+      setCurrentPlayerIndex(prevIndex => {
+        console.log(`Updating current player index from ${prevIndex} to ${nextPlayerIndex}`);
+        return nextPlayerIndex;
+      });
+      
+      // Add this condition to include the player's own bids
+      if (playerId === newSocket.id) {
+        playerName = 'You';
       }
-      setLastBidPlayerId(null);
+      
+      const logMessage = `${playerName} bid ${bid.quantity} ${bid.value}'s`;
+      addToGameLog(logMessage);
+      setLastAction(logMessage);
     });
 
     newSocket.on('challengeResult', (result) => {
@@ -181,9 +260,12 @@ const LiarsDice = () => {
     setSocket(newSocket);
 
     return () => {
-      newSocket.disconnect();
+      if (newSocket.connected) {
+        console.log('Disconnecting socket on cleanup');
+        newSocket.disconnect();
+      }
     };
-  }, [socketUrl, addToGameLog, lastBidPlayerId]);
+  }, [socketUrl]);
 
   useEffect(() => {
     if (gameMode === 'singlePlayer' && gameStatus === 'playing' && !players[currentPlayerIndex]?.isHuman) {
@@ -192,9 +274,9 @@ const LiarsDice = () => {
     }
   }, [gameMode, gameStatus, currentPlayerIndex, players, computerTurn]);
 
-  const addToGameLog = useCallback((entry: string) => {
-    setGameLog(prevLog => [...prevLog, { id: Date.now(), message: entry }]);
-  }, []);
+  useEffect(() => {
+    console.log(`Game state updated. Current player: ${currentPlayerIndex}, Current bid: ${JSON.stringify(currentBid)}`);
+  }, [currentPlayerIndex, currentBid]);
 
   const handleSelectSinglePlayer = (playerCount: number) => {
     setGameMode('singlePlayer');
@@ -304,12 +386,22 @@ const LiarsDice = () => {
       alert('Invalid bid. Please enter a higher bid.');
       return;
     }
-    console.log(`Placing bid: ${newBid.quantity} ${newBid.value}`);
+    console.log(`Attempting to place bid: ${newBid.quantity} ${newBid.value}`);
     
     const currentPlayer = players[currentPlayerIndex];
     setLastBidPlayerId(currentPlayer.id);
     
-    if (gameMode === 'singlePlayer') {
+    if (gameMode === 'multiplayer' && socket && roomCode) {
+      console.log(`Emitting placeBid event to server. RoomCode: ${roomCode}`);
+      socket.emit('placeBid', { roomCode, bid: newBid }, (response) => {
+        console.log('Server response to placeBid:', response);
+        if (!response.success) {
+          console.error('Failed to place bid:', response.error);
+          alert('Failed to place bid. Please try again.');
+        }
+        // Remove the local game log update from here
+      });
+    } else if (gameMode === 'singlePlayer') {
       setCurrentBid(newBid);
       const logMessage = `${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`;
       addToGameLog(logMessage);
@@ -322,8 +414,6 @@ const LiarsDice = () => {
       if (!players[nextPlayerIndex].isHuman) {
         setTimeout(() => computerTurn(), 1000);
       }
-    } else if (gameMode === 'multiplayer' && socket && roomCode) {
-      socket.emit('placeBid', { roomCode, bid: newBid });
     }
     
     setBidQuantity('');
@@ -366,7 +456,7 @@ const LiarsDice = () => {
         outcome: challengeOutcome
       };
       
-      addToGameLog(`Challenge ${challengeOutcome}! ${challengeResult.loserName} lost a die.`);
+      addToGameLog(`Challenge ${challengeOutcome}! There were ${actualCount} ${currentBid!.value}'s. ${challengeResult.loserName} lost a die.`);
       
       if (updatedPlayers[loserIndex].diceCount === 0) {
         updatedPlayers.splice(loserIndex, 1);
@@ -381,68 +471,6 @@ const LiarsDice = () => {
         setCurrentBid(null);
         startNewRound();
       }
-    }
-  };
-
-  const computerTurn = () => {
-    const currentPlayer = players[currentPlayerIndex];
-    if (currentPlayer.isHuman) {
-      console.error("Computer turn called for human player");
-      return;
-    }
-    console.log(`Computer ${currentPlayer.name}'s turn`);
-    const ownDice = currentPlayer.dice;
-    const totalDice = players.reduce((sum, player) => sum + player.diceCount, 0);
-    
-    let newBid;
-    if (!currentBid) {
-      const mostCommonValue = [...Array(6)].map((_, i) => 
-        ownDice.filter(d => d === i + 1 || d === 1).length
-      ).indexOf(Math.max(...[...Array(6)].map((_, i) => 
-        ownDice.filter(d => d === i + 1 || d === 1).length
-      ))) + 1;
-      
-      newBid = { 
-        quantity: Math.max(1, Math.floor(ownDice.filter(d => d === mostCommonValue || d === 1).length * 1.5)), 
-        value: mostCommonValue 
-      };
-    } else {
-      const ownCount = ownDice.filter(die => die === currentBid.value || die === 1).length;
-      const estimatedTotal = Math.round(ownCount * (totalDice / currentPlayer.diceCount));
-      const confidenceThreshold = 0.7;
-
-      if (estimatedTotal < currentBid.quantity * confidenceThreshold) {
-        console.log("Computer decides to challenge");
-        challenge();
-        return;
-      } else {
-        let attempts = 0;
-        do {
-          let newQuantity = currentBid.quantity;
-          let newValue = currentBid.value;
-
-          if (Math.random() < 0.7) {
-            newQuantity++;
-          } else {
-            newValue = Math.min(newValue + 1, DICE_SIDES);
-            if (newValue === currentBid.value) newQuantity++;
-          }
-
-          newBid = { quantity: newQuantity, value: newValue };
-          attempts++;
-          if (attempts > 10) break;  // Prevent infinite loop
-        } while (!isValidBid(newBid));
-      }
-    }
-    
-    console.log(`Computer places bid: ${newBid.quantity} ${newBid.value}`);
-    setCurrentBid(newBid);
-    addToGameLog(`${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`);
-    const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
-    setCurrentPlayerIndex(nextPlayerIndex);
-    
-    if (!players[nextPlayerIndex].isHuman) {
-      setTimeout(() => computerTurn(), 1000);
     }
   };
 
@@ -509,7 +537,7 @@ const LiarsDice = () => {
           <Card className="mb-8">
             <CardContent className="p-6">
               <h2 className="text-2xl font-semibold mb-4">
-              Current Bid: {currentBid ? `${currentBid.quantity} ${currentBid.value}&apos;s` : 'No bid'}
+              Current Bid: {currentBid ? `${currentBid.quantity} ${currentBid.value}'s` : 'No bid'}
               </h2>
               <p className="text-lg mb-4">Last Action: {lastAction}</p>
               {gameStatus === 'playing' && (
