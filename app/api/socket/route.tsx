@@ -1,18 +1,19 @@
-import { Server } from 'ws';
+import { Server, WebSocket } from 'ws';
 
 export function GET(req: Request) {
   if (!(req as any).socket.server.wss) {
-    console.log('Socket is initializing');
     const wss = new Server({ noServer: true });
     (req as any).socket.server.wss = wss;
 
-    wss.on('connection', (ws) => {
-      ws.on('message', (message: string) => {
-        const data = JSON.parse(message);
+    wss.on('connection', (ws: WebSocket) => {
+      ws.on('message', (message: WebSocket.Data) => {
+        const data = JSON.parse(message.toString());
         // Handle different types of messages here
         // Broadcast updates to all clients
         wss.clients.forEach((client) => {
-          client.send(JSON.stringify(data));
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(data));
+          }
         });
       });
     });
