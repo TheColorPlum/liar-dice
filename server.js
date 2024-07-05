@@ -92,12 +92,13 @@ io.on('connection', (socket) => {
       const room = rooms.get(roomCode);
       if (room && room.gameState === 'playing') {
         room.currentBid = bid;
-        const currentPlayerName = room.players[room.currentPlayerIndex].name;
+        const currentPlayer = room.players[room.currentPlayerIndex];
         room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
         io.to(roomCode).emit('bidPlaced', { 
           bid, 
           nextPlayerIndex: room.currentPlayerIndex,
-          playerName: currentPlayerName
+          playerName: currentPlayer.name,
+          playerId: currentPlayer.id
         });
       }
     } catch (error) {
@@ -173,14 +174,14 @@ io.on('connection', (socket) => {
       const playerIndex = room.players.findIndex(p => p.id === socket.id);
       if (playerIndex !== -1) {
         room.players.splice(playerIndex, 1);
-        if (room.players.length <= 1) {
+        if (room.players.length === 1) {
           room.gameState = 'gameOver';
           io.to(roomCode).emit('gameOver', { 
             reason: 'Player disconnected', 
-            winner: room.players.length === 1 ? room.players[0] : null 
+            winner: room.players[0]
           });
           rooms.delete(roomCode);
-        } else {
+        } else if (room.players.length > 1) {
           if (playerIndex < room.currentPlayerIndex || (playerIndex === room.players.length && room.currentPlayerIndex === 0)) {
             room.currentPlayerIndex--;
           }
