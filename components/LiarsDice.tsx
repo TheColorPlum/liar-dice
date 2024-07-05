@@ -183,14 +183,14 @@ const LiarsDice = () => {
     return () => {
       newSocket.disconnect();
     };
-  }, [socketUrl]);
+  }, [socketUrl, addToGameLog, lastBidPlayerId]);
 
   useEffect(() => {
     if (gameMode === 'singlePlayer' && gameStatus === 'playing' && !players[currentPlayerIndex]?.isHuman) {
       const timer = setTimeout(computerTurn, 1000);
       return () => clearTimeout(timer);
     }
-  }, [gameMode, gameStatus, currentPlayerIndex, players]);
+  }, [gameMode, gameStatus, currentPlayerIndex, players, computerTurn]);
 
   const addToGameLog = useCallback((entry: string) => {
     setGameLog(prevLog => [...prevLog, { id: Date.now(), message: entry }]);
@@ -509,7 +509,7 @@ const LiarsDice = () => {
           <Card className="mb-8">
             <CardContent className="p-6">
               <h2 className="text-2xl font-semibold mb-4">
-                Current Bid: {currentBid ? `${currentBid.quantity} ${currentBid.value}'s` : 'No bid'}
+              Current Bid: {currentBid ? `${currentBid.quantity} ${currentBid.value}&apos;s` : 'No bid'}
               </h2>
               <p className="text-lg mb-4">Last Action: {lastAction}</p>
               {gameStatus === 'playing' && (
