@@ -1,35 +1,7 @@
-import { Server as SocketIOServer } from 'socket.io';
-import type { NextApiRequest } from 'next';
-import type { Socket as SocketIOSocket } from 'socket.io';
+import { NextResponse } from 'next/server';
 
-export function GET(req: NextApiRequest, res: any) {
-  if (!res.socket.server.io) {
-    console.log('Initializing Socket.IO server...');
-    const io = new SocketIOServer(res.socket.server);
-    res.socket.server.io = io;
+export const runtime = 'nodejs';
 
-    io.on('connection', (socket: SocketIOSocket) => {
-      console.log('New client connected');
-
-      socket.on('message', (message: string) => {
-        console.log('Message received:', message);
-        const data = JSON.parse(message);
-        // Handle different types of messages here
-        // Broadcast updates to all clients
-        io.emit('message', data);
-      });
-
-      socket.on('disconnect', () => {
-        console.log('Client disconnected');
-      });
-    });
-  }
-
-  res.end();
+export async function GET(req: Request) {
+  return NextResponse.json({ message: "WebSocket server is running" }, { status: 200 });
 }
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};

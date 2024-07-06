@@ -1,34 +1,37 @@
 /** @type {import('next').NextConfig} */
 
-const nextConfig = {reactStrictMode: true,
-  swcMinify: true,
-};
-
 const securityHeaders = [
-    {
-      key: 'X-XSS-Protection',
-      value: '1; mode=block'
-    },
-    {
-      key: 'X-Frame-Options',
-      value: 'SAMEORIGIN'
-    },
-    {
-      key: 'X-Content-Type-Options',
-      value: 'nosniff'
+  {
+    key: 'X-XSS-Protection',
+    value: '1; mode=block'
+  },
+  {
+    key: 'X-Frame-Options',
+    value: 'SAMEORIGIN'
+  },
+  {
+    key: 'X-Content-Type-Options',
+    value: 'nosniff'
+  }
+];
+
+const nextConfig = {
+  reactStrictMode: true,
+  swcMinify: true,
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: securityHeaders,
+      },
+    ]
+  },
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.externals = [...(config.externals || []), 'bufferutil', 'utf-8-validate'];
     }
-  ];
-  
-  module.exports = {
-    async headers() {
-      return [
-        {
-          source: '/:path*',
-          headers: securityHeaders,
-        },
-      ]
-    },
-    swcMinify: true,
-  };
+    return config;
+  },
+};
 
 module.exports = nextConfig;
