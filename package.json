@@ -9,7 +9,7 @@
     "lint": "next lint",
     "server": "node server.js",
     "test": "jest",
-    "dev:all": "concurrently \"npm run dev\" \"npm run server\""
+    "dev:all": "concurrently \"node server.js\" \"next start\""
   },
   "dependencies": {
     "@radix-ui/react-scroll-area": "^1.1.0",
