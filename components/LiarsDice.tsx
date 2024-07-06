@@ -394,7 +394,7 @@ const LiarsDice = () => {
     
     if (gameMode === 'multiplayer' && socket && roomCode) {
       console.log(`Emitting placeBid event to server. RoomCode: ${roomCode}`);
-      socket.emit('placeBid', { roomCode, bid: newBid }, (response) => {
+      socket.emit('placeBid', { roomCode, bid: newBid }, (response: any) => {
         console.log('Server response to placeBid:', response);
         if (!response.success) {
           console.error('Failed to place bid:', response.error);
