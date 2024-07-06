@@ -117,6 +117,13 @@ const LiarsDice = () => {
   const [playerName, setPlayerName] = useState<string>('');
 
   const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+  const newSocket = io(socketUrl, {
+    transports: ['websocket'],
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+  });
 
   const addToGameLog = useCallback((entry: string) => {
     setGameLog(prevLog => [...prevLog, { id: Date.now(), message: entry }]);
@@ -186,10 +193,6 @@ const LiarsDice = () => {
   };
 
   useEffect(() => {
-    const newSocket = io(socketUrl, {
-      transports: ['websocket'],
-      upgrade: false,
-    });
 
     newSocket.on('connect', () => {
       setConnectionError(null);
