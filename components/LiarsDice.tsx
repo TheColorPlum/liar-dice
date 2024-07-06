@@ -129,19 +129,124 @@ const LiarsDice = () => {
     setGameLog(prevLog => [...prevLog, { id: Date.now(), message: entry }]);
   }, []);
 
+  const isValidBid = (newBid: {quantity: number, value: number}) => {
+    if (isEndGame) {
+      if (!newBid.value || newBid.value < 2 || newBid.value > 12) return false;
+      if (!currentBid) return true;
+      return newBid.value > currentBid.value;
+    } else {
+      if (!newBid.quantity || newBid.quantity <= 0 || !newBid.value || newBid.value < 2 || newBid.value > 6) {
+        return false;
+      }
+      if (!currentBid) return true;
+      if (newBid.quantity < currentBid.quantity) return false;
+      if (newBid.quantity === currentBid.quantity) {
+        if (currentBid.value === 6) return false;
+        return newBid.value > currentBid.value;
+      }
+      return true;
+    }
+  };
+
+  const challenge = () => {
+    if (gameMode === 'multiplayer' && socket && roomCode) {
+      socket.emit('challenge', { roomCode });
+    } else {
+      console.log('Implementing single player challenge logic');
+      let totalValue;
+      if (isEndGame) {
+        totalValue = players.reduce((sum, player) => sum + player.dice[0], 0);
+      } else {
+        const totalDice = players.flatMap(player => player.dice);
+        totalValue = totalDice.filter(die => die === currentBid!.value || die === 1).length;
+      }
+      
+      const challengerIndex = currentPlayerIndex;
+      const bidderIndex = (challengerIndex - 1 + players.length) % players.length;
+      
+      let loserIndex;
+      let challengeOutcome;
+      if (isEndGame) {
+        if (currentBid!.value > totalValue) {
+          loserIndex = bidderIndex;
+          challengeOutcome = 'succeeded';
+        } else {
+          loserIndex = challengerIndex;
+          challengeOutcome = 'failed';
+        }
+      } else {
+        if (totalValue >= currentBid!.quantity) {
+          loserIndex = challengerIndex;
+          challengeOutcome = 'failed';
+        } else {
+          loserIndex = bidderIndex;
+          challengeOutcome = 'succeeded';
+        }
+      }
+      
+      const updatedPlayers = [...players];
+      updatedPlayers[loserIndex].diceCount--;
+      
+      const challengeResult = {
+        challengerName: players[challengerIndex].name,
+        bidderName: players[bidderIndex].name,
+        loserName: players[loserIndex].name,
+        challengerIndex,
+        bidderIndex,
+        loserIndex,
+        actualCount: totalValue,
+        bid: currentBid,
+        outcome: challengeOutcome
+      };
+      
+      if (isEndGame) {
+        addToGameLog(`Challenge ${challengeOutcome}! The total value was ${totalValue}. ${challengeResult.loserName} lost the game.`);
+      } else {
+        addToGameLog(`Challenge ${challengeOutcome}! There were ${totalValue} ${currentBid!.value}'s. ${challengeResult.loserName} lost a die.`);
+      }
+      
+      if (updatedPlayers[loserIndex].diceCount === 0) {
+        updatedPlayers.splice(loserIndex, 1);
+      }
+      
+      if (updatedPlayers.length <= 1) {
+        setGameStatus('gameOver');
+        setWinner(updatedPlayers[0]);
+      } else {
+        setPlayers(updatedPlayers);
+        setCurrentPlayerIndex(loserIndex % updatedPlayers.length);
+        setCurrentBid(null);
+        startNewRound();
+      }
+    }
+  };
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const computerTurn = () => {
+  const computerTurn = useCallback(() => {
+    console.log("Computer turn started");
+    if (currentPlayerIndex >= players.length || !players[currentPlayerIndex]) {
+      console.error("Invalid player index or player not found");
+      return;
+    }
     const currentPlayer = players[currentPlayerIndex];
     if (currentPlayer.isHuman) {
       console.error("Computer turn called for human player");
       return;
     }
     console.log(`Computer ${currentPlayer.name}'s turn`);
+  
     const ownDice = currentPlayer.dice;
     const totalDice = players.reduce((sum, player) => sum + player.diceCount, 0);
     
     let newBid;
-    if (!currentBid) {
+    if (isEndGame) {
+      const ownDie = ownDice[0];
+      if (!currentBid) {
+        newBid = { quantity: 1, value: Math.min(ownDie + 3, 12) };
+      } else {
+        newBid = { quantity: 1, value: Math.min(currentBid.value + 1, 12) };
+      }
+    } else if (!currentBid) {
       const mostCommonValue = [...Array(6)].map((_, i) => 
         ownDice.filter(d => d === i + 1 || d === 1).length
       ).indexOf(Math.max(...[...Array(6)].map((_, i) => 
@@ -156,7 +261,7 @@ const LiarsDice = () => {
       const ownCount = ownDice.filter(die => die === currentBid.value || die === 1).length;
       const estimatedTotal = Math.round(ownCount * (totalDice / currentPlayer.diceCount));
       const confidenceThreshold = 0.7;
-
+  
       if (estimatedTotal < currentBid.quantity * confidenceThreshold) {
         console.log("Computer decides to challenge");
         challenge();
@@ -166,14 +271,14 @@ const LiarsDice = () => {
         do {
           let newQuantity = currentBid.quantity;
           let newValue = currentBid.value;
-
+  
           if (Math.random() < 0.7) {
             newQuantity++;
           } else {
             newValue = Math.min(newValue + 1, DICE_SIDES);
             if (newValue === currentBid.value) newQuantity++;
           }
-
+  
           newBid = { quantity: newQuantity, value: newValue };
           attempts++;
           if (attempts > 10) break;  // Prevent infinite loop
@@ -181,16 +286,20 @@ const LiarsDice = () => {
       }
     }
     
+    if (!newBid) {
+      console.error("Failed to generate a valid bid");
+      return;
+    }
+  
     console.log(`Computer places bid: ${newBid.quantity} ${newBid.value}`);
     setCurrentBid(newBid);
-    addToGameLog(`${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`);
+    addToGameLog(`${currentPlayer.name} bid ${isEndGame ? '' : newBid.quantity + ' '}${newBid.value}'s`);
+    
     const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
     setCurrentPlayerIndex(nextPlayerIndex);
-    
-    if (!players[nextPlayerIndex].isHuman) {
-      setTimeout(() => computerTurn(), 1000);
-    }
-  };
+    setLastAction(`${currentPlayer.name} placed a bid`);
+
+  }, [currentPlayerIndex, players, isEndGame, currentBid, addToGameLog, setCurrentBid, challenge, isValidBid, DICE_SIDES]);
 
   useEffect(() => {
 
@@ -272,8 +381,11 @@ const LiarsDice = () => {
   }, [socketUrl, addToGameLog]);
 
   useEffect(() => {
-    if (gameMode === 'singlePlayer' && gameStatus === 'playing' && !players[currentPlayerIndex]?.isHuman) {
-      const timer = setTimeout(computerTurn, 1000);
+    if (gameMode === 'singlePlayer' && gameStatus === 'playing' && players[currentPlayerIndex] && !players[currentPlayerIndex].isHuman) {
+      const timer = setTimeout(() => {
+        console.log("Executing computer turn");
+        computerTurn();
+      }, 1000);
       return () => clearTimeout(timer);
     }
   }, [gameMode, gameStatus, currentPlayerIndex, players, computerTurn]);
@@ -359,11 +471,12 @@ const LiarsDice = () => {
     setPlayers([]);
   };
 
-  const startNewRound = () => {
-    setPlayers(prevPlayers => prevPlayers.map(player => ({
+  const startNewRound = useCallback(() => {
+    const updatedPlayers = players.map(player => ({
       ...player,
       dice: Array.from({ length: player.diceCount }, () => Math.floor(Math.random() * DICE_SIDES) + 1)
-    })));
+    }));
+    setPlayers(updatedPlayers);
     setCurrentBid(null);
     setGameStatus('playing');
     setCurrentPlayerIndex(0);
@@ -371,23 +484,16 @@ const LiarsDice = () => {
     setBidValue('');
     setLastAction('New round started');
     addToGameLog('New round started.');
-    setWinner(null);  // Reset the winner state
+    setWinner(null);
   
-    // If it's single-player mode and the first player is not human, start computer turn
-    if (gameMode === 'singlePlayer' && !players[0].isHuman) {
-      setTimeout(computerTurn, 1000);
+    // Check for end game scenario
+    if (updatedPlayers.length === 2 && updatedPlayers.every(player => player.diceCount === 1)) {
+      setIsEndGame(true);
+      addToGameLog('End game scenario: Only two players with one die each remain!');
+    } else {
+      setIsEndGame(false);
     }
-  };
-
-  const isValidBid = (newBid: {quantity: number, value: number}) => {
-    if (newBid.quantity < 1 || newBid.value < MIN_BID_VALUE || newBid.value > DICE_SIDES) {
-      return false;
-    }
-    if (!currentBid) return true;
-    if (newBid.quantity < currentBid.quantity) return false;
-    if (newBid.quantity === currentBid.quantity && newBid.value <= currentBid.value) return false;
-    return true;
-  };
+  }, [players, addToGameLog, DICE_SIDES]);
 
   const placeBid = () => {
     const newBid = { 
@@ -395,7 +501,11 @@ const LiarsDice = () => {
       value: parseInt(bidValue) 
     };
     if (!isValidBid(newBid)) {
-      alert('Invalid bid. Please enter a higher bid.');
+      if (isEndGame) {
+        alert('Invalid bid. Please ensure the value is between 2 and 12 and higher than the current bid.');
+      } else {
+        alert('Invalid bid. Please ensure:\n1. Quantity is greater than 0 and current bid quantity.\n2. Value is between 2 and 6.\n3. If quantity is the same, value must be higher (unless current value is 6).');
+      }
       return;
     }
     console.log(`Attempting to place bid: ${newBid.quantity} ${newBid.value}`);
@@ -430,60 +540,6 @@ const LiarsDice = () => {
     
     setBidQuantity('');
     setBidValue('');
-  };
-
-  const challenge = () => {
-    if (gameMode === 'multiplayer' && socket && roomCode) {
-      socket.emit('challenge', { roomCode });
-    } else {
-      console.log('Implementing single player challenge logic');
-      const totalDice = players.flatMap(player => player.dice);
-      const actualCount = totalDice.filter(die => die === currentBid!.value || die === 1).length;
-      
-      const challengerIndex = currentPlayerIndex;
-      const bidderIndex = (challengerIndex - 1 + players.length) % players.length;
-      
-      let loserIndex;
-      let challengeOutcome;
-      if (actualCount >= currentBid!.quantity) {
-        loserIndex = challengerIndex;
-        challengeOutcome = 'failed';
-      } else {
-        loserIndex = bidderIndex;
-        challengeOutcome = 'succeeded';
-      }
-      
-      const updatedPlayers = [...players];
-      updatedPlayers[loserIndex].diceCount--;
-      
-      const challengeResult = {
-        challengerName: players[challengerIndex].name,
-        bidderName: players[bidderIndex].name,
-        loserName: players[loserIndex].name,
-        challengerIndex,
-        bidderIndex,
-        loserIndex,
-        actualCount,
-        bid: currentBid,
-        outcome: challengeOutcome
-      };
-      
-      addToGameLog(`Challenge ${challengeOutcome}! There were ${actualCount} ${currentBid!.value}'s. ${challengeResult.loserName} lost a die.`);
-      
-      if (updatedPlayers[loserIndex].diceCount === 0) {
-        updatedPlayers.splice(loserIndex, 1);
-      }
-      
-      if (updatedPlayers.length <= 1) {
-        setGameStatus('gameOver');
-        setWinner(updatedPlayers[0]);
-      } else {
-        setPlayers(updatedPlayers);
-        setCurrentPlayerIndex(loserIndex % updatedPlayers.length);
-        setCurrentBid(null);
-        startNewRound();
-      }
-    }
   };
 
   if (gameMode === 'start') {
@@ -549,7 +605,7 @@ const LiarsDice = () => {
           <Card className="mb-8">
             <CardContent className="p-6">
               <h2 className="text-2xl font-semibold mb-4">
-              Current Bid: {currentBid ? `${currentBid.quantity} ${currentBid.value}'s` : 'No bid'}
+                Current Bid: {currentBid ? `${isEndGame ? '' : currentBid.quantity + ' '}${currentBid.value}'s` : 'No bid'}
               </h2>
               <p className="text-lg mb-4">Last Action: {lastAction}</p>
               {gameStatus === 'playing' && (
@@ -557,19 +613,22 @@ const LiarsDice = () => {
                 (gameMode === 'multiplayer' && players[currentPlayerIndex]?.id === playerId)
               ) && (
                 <div className="flex flex-wrap gap-4 items-end">
-                  <Input
-                    type="number"
-                    placeholder="Quantity"
-                    value={bidQuantity}
-                    onChange={(e) => setBidQuantity(e.target.value)}
-                    className="w-32"
-                  />
+                  {!isEndGame && (
+                    <Input
+                      type="number"
+                      placeholder="Quantity"
+                      value={bidQuantity}
+                      onChange={(e) => setBidQuantity(e.target.value)}
+                      className="w-32"
+                      min="1"
+                    />
+                  )}
                   <Select onValueChange={setBidValue} value={bidValue}>
                     <SelectTrigger className="w-32">
                       <SelectValue placeholder="Select value" />
                     </SelectTrigger>
                     <SelectContent>
-                      {[2, 3, 4, 5, 6].map(value => (
+                      {(isEndGame ? [2,3,4,5,6,7,8,9,10,11,12] : [2,3,4,5,6]).map(value => (
                         <SelectItem key={value} value={value.toString()}>{value}</SelectItem>
                       ))}
                     </SelectContent>

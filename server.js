@@ -46,7 +46,6 @@ io.on('connection', (socket) => {
       socket.join(roomCode);
       console.log(`Room created: ${roomCode}, Player: ${playerName}, ID: ${socket.id}`);
       callback({ roomCode, playerId: socket.id });
-      // io.to(roomCode).emit('playerJoined', newPlayer);
     } catch (error) {
       console.error('Error in createRoom:', error);
       callback({ error: 'Failed to create room' });
