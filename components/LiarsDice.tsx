@@ -302,10 +302,18 @@ const LiarsDice = () => {
     const name = prompt("Enter your name:") || "Player";
     setPlayerName(name);
     if (socket) {
-      socket.emit('createRoom', { playerName: name }, (response: { roomCode: string, playerId: string }) => {
+      console.log("Emitting createRoom event");
+      socket.emit('createRoom', { playerName: name }, (response: { roomCode: string, playerId: string, error?: string }) => {
+        console.log("Received createRoom response:", response);
+        if (response.error) {
+          console.error("Error creating room:", response.error);
+          alert("Failed to create room. Please try again.");
+          return;
+        }
         setRoomCode(response.roomCode);
         setPlayerId(response.playerId);
         setPlayers([{ id: response.playerId, name: name, dice: [], diceCount: TOTAL_DICE, isHuman: true }]);
+        setGameStatus('waiting');
       });
     }
   };

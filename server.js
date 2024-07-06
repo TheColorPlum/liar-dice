@@ -36,14 +36,17 @@ io.on('connection', (socket) => {
     console.log(`Creating room for player: ${playerName}`);
     try {
       const roomCode = generateRoomCode();
+      const newPlayer = { id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true };
       rooms.set(roomCode, { 
-        players: [{ id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true }],
+        players: [newPlayer],
         gameState: 'waiting',
         currentPlayerIndex: 0,
         currentBid: null
       });
       socket.join(roomCode);
+      console.log(`Room created: ${roomCode}, Player: ${playerName}, ID: ${socket.id}`);
       callback({ roomCode, playerId: socket.id });
+      // io.to(roomCode).emit('playerJoined', newPlayer);
     } catch (error) {
       console.error('Error in createRoom:', error);
       callback({ error: 'Failed to create room' });
