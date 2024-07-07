@@ -20,12 +20,21 @@ const DICE_SIDES = 6;
 
 const rooms = new Map();
 
+const ROOM_CLEANUP_DELAY = 5 * 60 * 1000; // 5 minutes in milliseconds
+
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
 function rollDice(count) {
   return Array.from({ length: count }, () => Math.floor(Math.random() * DICE_SIDES) + 1);
+}
+
+function logRooms() {
+  console.log("Current rooms:");
+  rooms.forEach((room, code) => {
+    console.log(`Room ${code}: ${room.players.length} players, state: ${room.gameState}`);
+  });
 }
 
 io.on('connection', (socket) => {
@@ -74,19 +83,30 @@ io.on('connection', (socket) => {
   });
 
   socket.on('startGame', ({ roomCode }, callback) => {
+    console.log(`Received startGame event for room ${roomCode}`);
     try {
       const room = rooms.get(roomCode);
-      if (room) {
+      if (room && room.gameState === 'waiting') {
         room.gameState = 'playing';
         room.currentPlayerIndex = 0;
         room.currentBid = null;
         room.players.forEach(player => {
           player.dice = rollDice(player.diceCount);
         });
-        io.to(roomCode).emit('gameStarted', { players: room.players, currentPlayerIndex: room.currentPlayerIndex });
+        console.log(`Starting game in room ${roomCode}`);
+  
+        io.in(roomCode).emit('gameStarted', { 
+          players: room.players, 
+          currentPlayerIndex: room.currentPlayerIndex 
+        });
+  
+        // Save the updated room state
+        rooms.set(roomCode, room);
+  
         callback({ success: true });
       } else {
-        callback({ success: false, message: 'Room not found' });
+        console.log(`Failed to start game in room ${roomCode}. Room state: ${room ? room.gameState : 'not found'}`);
+        callback({ success: false, message: 'Room not found or game already started' });
       }
     } catch (error) {
       console.error('Error in startGame:', error);
@@ -98,9 +118,11 @@ io.on('connection', (socket) => {
     console.log(`Received bid from room ${roomCode}: ${bid.quantity} ${bid.value}'s`);
     try {
       const room = rooms.get(roomCode);
+      console.log('Room state:', room ? room.gameState : 'Room not found');
       if (room && room.gameState === 'playing') {
         room.currentBid = bid;
         const currentPlayerIndex = room.players.findIndex(p => p.id === socket.id);
+        console.log('Current player index:', currentPlayerIndex);
         const currentPlayer = room.players[currentPlayerIndex];
         room.currentPlayerIndex = (currentPlayerIndex + 1) % room.players.length;
         
@@ -111,6 +133,10 @@ io.on('connection', (socket) => {
           playerName: currentPlayer.name,
           playerId: currentPlayer.id
         });
+  
+        // Save the updated room state
+        rooms.set(roomCode, room);
+  
         callback({ success: true });
       } else {
         console.log(`Invalid bid placement. Room: ${roomCode}, State: ${room ? room.gameState : 'not found'}`);
@@ -188,24 +214,22 @@ io.on('connection', (socket) => {
     for (const [roomCode, room] of rooms.entries()) {
       const playerIndex = room.players.findIndex(p => p.id === socket.id);
       if (playerIndex !== -1) {
-        room.players.splice(playerIndex, 1);
-        if (room.players.length === 1) {
-          room.gameState = 'gameOver';
-          io.to(roomCode).emit('gameOver', { 
-            reason: 'Player disconnected', 
-            winner: room.players[0]
-          });
-          rooms.delete(roomCode);
-        } else if (room.players.length > 1) {
-          if (playerIndex < room.currentPlayerIndex || (playerIndex === room.players.length && room.currentPlayerIndex === 0)) {
-            room.currentPlayerIndex--;
-          }
-          room.currentPlayerIndex %= room.players.length;
-          io.to(roomCode).emit('playerLeft', { 
-            playerId: socket.id, 
-            nextPlayerIndex: room.currentPlayerIndex 
-          });
+        // Mark the player as disconnected instead of removing them
+        room.players[playerIndex].connected = false;
+        console.log(`Player ${room.players[playerIndex].name} marked as disconnected in room ${roomCode}`);
+  
+        // Notify other players in the room
+        socket.to(roomCode).emit('playerDisconnected', { playerId: socket.id });
+  
+        // If all players are disconnected, set a timer to clean up the room
+        if (room.players.every(p => !p.connected)) {
+          console.log(`All players disconnected in room ${roomCode}. Setting cleanup timer.`);
+          room.cleanupTimer = setTimeout(() => {
+            console.log(`Cleanup timer expired. Removing room: ${roomCode}`);
+            rooms.delete(roomCode);
+          }, ROOM_CLEANUP_DELAY);
         }
+  
         break;
       }
     }
