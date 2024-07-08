@@ -18,6 +18,14 @@ interface Player {
   connected: boolean;
 }
 
+interface ChallengeResult {
+  players: Player[];
+  outcome: string;
+  actualCount: number;
+  bid: { value: number };
+  loserName: string;
+}
+
 const TOTAL_DICE = 5;
 const DICE_SIDES = 6;
 const MIN_BID_VALUE = 2;
@@ -309,11 +317,11 @@ const LiarsDice = () => {
       console.log('Connected to server');
     });
 
-    const handleChallengeResult = (result) => {
+    const handleChallengeResult = (result: ChallengeResult) => {
       console.log('Received challenge result:', result);
       setPlayers(result.players.map(player => ({
         ...player,
-        dice: player.dice.slice(0, player.diceCount) // Ensure the dice array matches the diceCount
+        dice: player.dice.slice(0, player.diceCount)
       })));
       addToGameLog(`Challenge ${result.outcome}! There were ${result.actualCount} ${result.bid.value}'s. ${result.loserName} lost a die.`, true);
     };
@@ -485,12 +493,12 @@ const LiarsDice = () => {
     checkEndGameScenario();
   }, [players]);
 
-  const checkEndGameScenario = () => {
+  const checkEndGameScenario = useCallback(() => {
     console.log('Checking for end game scenario');
     console.log('Players:', players);
     console.log('Players count:', players.length);
     console.log('Players dice count:', players.map(player => player.diceCount));
-
+  
     if (players.length === 2 && players.every(player => player.diceCount === 1)) {
       console.log('End game condition met!');
       setIsEndGame(true);
@@ -498,7 +506,7 @@ const LiarsDice = () => {
     } else {
       setIsEndGame(false);
     }
-  };
+  }, [players, addToGameLog]);
   
   const handleSelectSinglePlayer = (playerCount: number) => {
     setGameMode('singlePlayer');
