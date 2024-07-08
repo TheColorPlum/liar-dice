@@ -20,8 +20,6 @@ const DICE_SIDES = 6;
 
 const rooms = new Map();
 
-const ROOM_CLEANUP_DELAY = 5 * 60 * 1000; // 5 minutes in milliseconds
-
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
@@ -34,6 +32,7 @@ function logRooms() {
   console.log("Current rooms:");
   rooms.forEach((room, code) => {
     console.log(`Room ${code}: ${room.players.length} players, state: ${room.gameState}`);
+    console.log("Players:", room.players.map(p => ({ id: p.id, name: p.name, connected: p.connected })));
   });
 }
 
@@ -45,28 +44,52 @@ io.on('connection', (socket) => {
     console.log(`Creating room for player: ${playerName}`);
     try {
       const roomCode = generateRoomCode();
-      const newPlayer = { id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true };
-      rooms.set(roomCode, { 
+      const newPlayer = { id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true, connected: true };
+      const room = { 
         players: [newPlayer],
         gameState: 'waiting',
         currentPlayerIndex: 0,
         currentBid: null
-      });
+      };
+      rooms.set(roomCode, room);
       socket.join(roomCode);
       console.log(`Room created: ${roomCode}, Player: ${playerName}, ID: ${socket.id}`);
-      callback({ roomCode, playerId: socket.id });
+      callback({ success: true, roomCode, playerId: socket.id, players: room.players });
+      
+      // Emit a room update to all clients in the room
+      io.to(roomCode).emit('roomUpdate', { players: room.players });
     } catch (error) {
       console.error('Error in createRoom:', error);
-      callback({ error: 'Failed to create room' });
+      callback({ success: false, error: 'Failed to create room' });
     }
   });
-
+  
+  socket.on('reconnectToRoom', ({ roomCode, playerName }, callback) => {
+    console.log(`Player ${playerName} attempting to reconnect to room ${roomCode}`);
+    const room = rooms.get(roomCode);
+    if (room) {
+      const playerIndex = room.players.findIndex(p => p.name === playerName);
+      if (playerIndex !== -1) {
+        room.players[playerIndex].id = socket.id;
+        room.players[playerIndex].connected = true;
+        socket.join(roomCode);
+        console.log(`Player ${playerName} reconnected to room ${roomCode}`);
+        callback({ success: true, players: room.players });
+        io.to(roomCode).emit('roomUpdate', { players: room.players });
+      } else {
+        callback({ success: false, error: 'Player not found in room' });
+      }
+    } else {
+      callback({ success: false, error: 'Room not found' });
+    }
+  });
+  
   socket.on('joinRoom', ({ roomCode, playerName }, callback) => {
     console.log(`Player ${playerName} attempting to join room ${roomCode}`);
     try {
       const room = rooms.get(roomCode);
       if (room && room.gameState === 'waiting') {
-        const newPlayer = { id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true };
+        const newPlayer = { id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true, connected: true };
         room.players.push(newPlayer);
         socket.join(roomCode);
         console.log(`Player ${playerName} joined room ${roomCode}. Total players: ${room.players.length}`);
@@ -81,7 +104,7 @@ io.on('connection', (socket) => {
       callback({ success: false, message: 'Failed to join room' });
     }
   });
-
+  
   socket.on('startGame', ({ roomCode }, callback) => {
     console.log(`Received startGame event for room ${roomCode}`);
     try {
@@ -90,19 +113,19 @@ io.on('connection', (socket) => {
         room.gameState = 'playing';
         room.currentPlayerIndex = 0;
         room.currentBid = null;
+        
         room.players.forEach(player => {
           player.dice = rollDice(player.diceCount);
+          player.connected = true;
         });
+        
         console.log(`Starting game in room ${roomCode}`);
-  
         io.in(roomCode).emit('gameStarted', { 
           players: room.players, 
           currentPlayerIndex: room.currentPlayerIndex 
         });
-  
-        // Save the updated room state
+        
         rooms.set(roomCode, room);
-  
         callback({ success: true });
       } else {
         console.log(`Failed to start game in room ${roomCode}. Room state: ${room ? room.gameState : 'not found'}`);
@@ -113,9 +136,9 @@ io.on('connection', (socket) => {
       callback({ success: false, message: 'Failed to start game' });
     }
   });
-
+  
   socket.on('placeBid', ({ roomCode, bid }, callback) => {
-    console.log(`Received bid from room ${roomCode}: ${bid.quantity} ${bid.value}'s`);
+    console.log(`Received bid from room ${roomCode}: ${bid ? `${bid.quantity} ${bid.value}'s` : 'null'}`);
     try {
       const room = rooms.get(roomCode);
       console.log('Room state:', room ? room.gameState : 'Room not found');
@@ -123,13 +146,20 @@ io.on('connection', (socket) => {
         room.currentBid = bid;
         const currentPlayerIndex = room.players.findIndex(p => p.id === socket.id);
         console.log('Current player index:', currentPlayerIndex);
-        const currentPlayer = room.players[currentPlayerIndex];
-        room.currentPlayerIndex = (currentPlayerIndex + 1) % room.players.length;
+        console.log('Room players:', room.players.map(p => ({ id: p.id, name: p.name, connected: p.connected })));
         
-        console.log(`Broadcasting bidPlaced event to room ${roomCode}. Next player index: ${room.currentPlayerIndex}`);
-        io.in(roomCode).emit('bidPlaced', { 
+        if (currentPlayerIndex === -1) {
+          throw new Error('Player not found in room');
+        }
+        
+        const currentPlayer = room.players[currentPlayerIndex];
+        const nextPlayerIndex = (currentPlayerIndex + 1) % room.players.length;
+        room.currentPlayerIndex = nextPlayerIndex;
+        
+        console.log(`Broadcasting bidPlaced event to room ${roomCode}. Next player index: ${nextPlayerIndex}`);
+        io.to(roomCode).emit('bidPlaced', { 
           bid, 
-          nextPlayerIndex: room.currentPlayerIndex,
+          nextPlayerIndex,
           playerName: currentPlayer.name,
           playerId: currentPlayer.id
         });
@@ -148,93 +178,82 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('challenge', ({ roomCode }) => {
+  socket.on('challenge', ({ roomCode }, callback) => {
+    console.log(`Received challenge from room ${roomCode}`);
     try {
       const room = rooms.get(roomCode);
       if (room && room.gameState === 'playing') {
-        const { currentBid, players } = room;
-        const totalDice = players.flatMap(player => player.dice);
-        const actualCount = totalDice.filter(die => die === currentBid.value || die === 1).length;
-
+        const currentBid = room.currentBid;
+        const totalValue = room.players.flatMap(player => player.dice).filter(die => die === currentBid.value || die === 1).length;
         const challengerIndex = room.currentPlayerIndex;
-        const bidderIndex = (challengerIndex - 1 + players.length) % players.length;
-
+        const bidderIndex = (challengerIndex - 1 + room.players.length) % room.players.length;
+  
         let loserIndex;
         let challengeOutcome;
-        if (actualCount >= currentBid.quantity) {
+        if (totalValue >= currentBid.quantity) {
           loserIndex = challengerIndex;
           challengeOutcome = 'failed';
         } else {
           loserIndex = bidderIndex;
           challengeOutcome = 'succeeded';
         }
-
-        players[loserIndex].diceCount--;
-
+  
+        room.players[loserIndex].diceCount--;
+  
         const challengeResult = {
-          challengerName: players[challengerIndex].name,
-          bidderName: players[bidderIndex].name,
-          loserName: players[loserIndex].name,
+          challengerName: room.players[challengerIndex].name,
+          bidderName: room.players[bidderIndex].name,
+          loserName: room.players[loserIndex].name,
           challengerIndex,
           bidderIndex,
           loserIndex,
-          actualCount,
+          actualCount: totalValue,
           bid: currentBid,
-          outcome: challengeOutcome
+          outcome: challengeOutcome,
+          players: room.players // Include the updated players list
         };
-
-        if (players[loserIndex].diceCount === 0) {
-          players.splice(loserIndex, 1);
-          if (loserIndex < room.currentPlayerIndex || (loserIndex === players.length && room.currentPlayerIndex === 0)) {
-            room.currentPlayerIndex--;
-          }
+  
+        io.to(roomCode).emit('challengeResult', challengeResult);
+  
+        if (room.players[loserIndex].diceCount === 0) {
+          room.players.splice(loserIndex, 1);
         }
-
-        if (players.length <= 1) {
+  
+        if (room.players.length <= 1) {
           room.gameState = 'gameOver';
-          io.to(roomCode).emit('gameOver', { winner: players[0], challengeResult });
+          io.to(roomCode).emit('gameOver', { winner: room.players[0], reason: `${room.players[0].name} wins!` });
         } else {
-          room.currentPlayerIndex = loserIndex % players.length;
+          room.currentPlayerIndex = loserIndex % room.players.length;
           room.currentBid = null;
-          players.forEach(player => {
-            player.dice = rollDice(player.diceCount);
-          });
-          io.to(roomCode).emit('challengeResult', challengeResult);
           io.to(roomCode).emit('newRound', { players: room.players, currentPlayerIndex: room.currentPlayerIndex });
         }
+  
+        rooms.set(roomCode, room);
+        if (callback) callback({ success: true });
+      } else {
+        console.log(`Invalid challenge. Room: ${roomCode}, State: ${room ? room.gameState : 'not found'}`);
+        if (callback) callback({ success: false, error: 'Invalid game state' });
       }
     } catch (error) {
       console.error('Error in challenge:', error);
-      io.to(roomCode).emit('error', 'Failed to process challenge');
+      if (callback) callback({ success: false, error: error.message });
     }
-  });
-
+  });    
+  
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
     for (const [roomCode, room] of rooms.entries()) {
       const playerIndex = room.players.findIndex(p => p.id === socket.id);
       if (playerIndex !== -1) {
-        // Mark the player as disconnected instead of removing them
         room.players[playerIndex].connected = false;
-        console.log(`Player ${room.players[playerIndex].name} marked as disconnected in room ${roomCode}`);
-  
-        // Notify other players in the room
-        socket.to(roomCode).emit('playerDisconnected', { playerId: socket.id });
-  
-        // If all players are disconnected, set a timer to clean up the room
-        if (room.players.every(p => !p.connected)) {
-          console.log(`All players disconnected in room ${roomCode}. Setting cleanup timer.`);
-          room.cleanupTimer = setTimeout(() => {
-            console.log(`Cleanup timer expired. Removing room: ${roomCode}`);
-            rooms.delete(roomCode);
-          }, ROOM_CLEANUP_DELAY);
-        }
-  
+        console.log(`Player ${room.players[playerIndex].name} disconnected from room ${roomCode}`);
+        io.to(roomCode).emit('playerDisconnected', { playerName: room.players[playerIndex].name, playerIndex });
         break;
       }
     }
+    logRooms();
   });
-});
+});  
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {

@@ -9,6 +9,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dice1, Dice2, Dice3, Dice4, Dice5, Dice6 } from 'lucide-react';
 
+interface Player {
+  id: string;
+  name: string;
+  dice: number[];
+  diceCount: number;
+  isHuman: boolean;
+  connected: boolean;
+}
+
 const TOTAL_DICE = 5;
 const DICE_SIDES = 6;
 const MIN_BID_VALUE = 2;
@@ -103,7 +112,7 @@ const LiarsDice = () => {
   const [gameMode, setGameMode] = useState<'start' | 'singlePlayer' | 'multiplayer' | 'joinGame' | 'playing'>('start');
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
-  const [players, setPlayers] = useState<Array<{id: string; name: string; dice: number[]; diceCount: number; isHuman: boolean}>>([]);
+  const [players, setPlayers] = useState<Player[]>([]);
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState<number>(0);
   const [currentBid, setCurrentBid] = useState<{quantity: number; value: number} | null>(null);
   const [gameStatus, setGameStatus] = useState<'waiting' | 'playing' | 'roundEnd' | 'gameOver'>('waiting');
@@ -204,20 +213,27 @@ const LiarsDice = () => {
   const challenge = () => {
     if (gameMode === 'multiplayer' && socket && roomCode) {
       console.log('Emitting multiplayer challenge event to server');
-      socket.emit('challenge', { roomCode });
+      socket.emit('challenge', { roomCode }, (response: { success: boolean, error?: string }) => {
+        if (!response.success) {
+          console.error('Challenge failed:', response.error);
+        }
+      });
     } else {
       console.log('Implementing single player challenge logic');
+      console.log('Is End Game:', isEndGame);
       let totalValue;
       if (isEndGame) {
         totalValue = players.reduce((sum, player) => sum + player.dice[0], 0);
+        console.log('End Game Total Value:', totalValue);
       } else {
         const totalDice = players.flatMap(player => player.dice);
         totalValue = totalDice.filter(die => die === currentBid!.value || die === 1).length;
+        console.log('Normal Game Total Value:', totalValue);
       }
-      
+  
       const challengerIndex = currentPlayerIndex;
       const bidderIndex = (challengerIndex - 1 + players.length) % players.length;
-      
+  
       let loserIndex;
       let challengeOutcome;
       if (isEndGame) {
@@ -237,10 +253,11 @@ const LiarsDice = () => {
           challengeOutcome = 'succeeded';
         }
       }
-      
+  
       const updatedPlayers = [...players];
       updatedPlayers[loserIndex].diceCount--;
-      
+      updatedPlayers[loserIndex].dice = updatedPlayers[loserIndex].dice.slice(0, updatedPlayers[loserIndex].diceCount); // Update dice array
+  
       const challengeResult = {
         challengerName: players[challengerIndex].name,
         bidderName: players[bidderIndex].name,
@@ -250,19 +267,20 @@ const LiarsDice = () => {
         loserIndex,
         actualCount: totalValue,
         bid: currentBid,
-        outcome: challengeOutcome
+        outcome: challengeOutcome,
+        players: updatedPlayers // Include updated players list
       };
-      
+  
       if (isEndGame) {
         addToGameLog(`Challenge ${challengeOutcome}! The total value was ${totalValue}. ${challengeResult.loserName} lost the game.`);
       } else {
         addToGameLog(`Challenge ${challengeOutcome}! There were ${totalValue} ${currentBid!.value}'s. ${challengeResult.loserName} lost a die.`);
       }
-      
+  
       if (updatedPlayers[loserIndex].diceCount === 0) {
         updatedPlayers.splice(loserIndex, 1);
       }
-      
+  
       if (updatedPlayers.length <= 1) {
         setGameStatus('gameOver');
         setWinner(updatedPlayers[0]);
@@ -275,6 +293,7 @@ const LiarsDice = () => {
       }
     }
   };
+  
 
   useEffect(() => {
     const newSocket = io(socketUrl, {
@@ -284,12 +303,83 @@ const LiarsDice = () => {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
     });
-
+  
     newSocket.on('connect', () => {
       setConnectionError(null);
       console.log('Connected to server');
     });
 
+    const handleChallengeResult = (result) => {
+      console.log('Received challenge result:', result);
+      setPlayers(result.players.map(player => ({
+        ...player,
+        dice: player.dice.slice(0, player.diceCount) // Ensure the dice array matches the diceCount
+      })));
+      addToGameLog(`Challenge ${result.outcome}! There were ${result.actualCount} ${result.bid.value}'s. ${result.loserName} lost a die.`, true);
+    };
+      
+    
+    const handleNewRound = ({ players, currentPlayerIndex }) => {
+      console.log('Starting new round');
+      setPlayers(players);
+      setCurrentPlayerIndex(currentPlayerIndex);
+      setCurrentBid(null);
+    };
+    
+    const handleGameOver = ({ winner, reason }) => {
+      console.log('Game over:', reason);
+      setGameStatus('gameOver');
+      setWinner(winner);
+    };
+  
+    newSocket.on('challengeResult', handleChallengeResult);
+    newSocket.on('newRound', handleNewRound);
+    newSocket.on('gameOver', handleGameOver);
+  
+    // Check if there's stored room info and attempt to reconnect
+    const storedRoomInfo = localStorage.getItem('roomInfo');
+    if (storedRoomInfo) {
+      const { roomCode, playerName } = JSON.parse(storedRoomInfo);
+      newSocket.emit('reconnectToRoom', { roomCode, playerName }, (response: { success: boolean, players: Player[], error?: string }) => {
+        if (response.success) {
+          setRoomCode(roomCode);
+          setPlayerName(playerName);
+          setPlayers(response.players);
+          setGameStatus('waiting');
+          console.log(`Reconnected to room: ${roomCode}`);
+        } else {
+          console.error("Failed to reconnect:", response.error);
+          localStorage.removeItem('roomInfo');
+        }
+      });
+    }
+  
+    newSocket.on('roomUpdate', ({ players }) => {
+      console.log('Room update received:', players);
+      setPlayers(players);
+    });
+  
+    newSocket.on('playerRejoined', ({ playerName, playerIndex }) => {
+      addToGameLog(`${playerName} has rejoined the game.`);
+      setPlayers(prevPlayers => {
+        return prevPlayers.map((player, index) => 
+          index === playerIndex ? { ...player, connected: true } : player
+        );
+      });
+    });
+  
+    newSocket.on('playerDisconnected', ({ playerName, playerIndex }) => {
+      console.log(`Player disconnected: ${playerName}`);
+      setPlayers(prevPlayers => {
+        const newPlayers = [...prevPlayers];
+        if (newPlayers[playerIndex]) {
+          newPlayers[playerIndex].connected = false;
+        }
+        return newPlayers;
+      });
+      addToGameLog(`${playerName} has disconnected from the game.`);
+    });
+  
     newSocket.on('disconnect', (reason) => {
       console.log('Disconnected from server:', reason);
       if (reason === 'io server disconnect') {
@@ -298,18 +388,18 @@ const LiarsDice = () => {
       }
       // else the socket will automatically try to reconnect
     });
-
+  
     newSocket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
       setConnectionError('Error connecting to game server. Please try again later.');
     });
-
+  
     newSocket.on('playerJoined', (newPlayer) => {
       console.log('Player joined event received', newPlayer);
       setPlayers(prevPlayers => [...prevPlayers, newPlayer]);
       addToGameLog(`${newPlayer.name} joined the game.`);
     });
-
+  
     newSocket.on('gameStarted', (gameData) => {
       console.log('Game started event received', gameData);
       setGameStatus('playing');
@@ -318,81 +408,109 @@ const LiarsDice = () => {
       addToGameLog('The game has started!');
     });
   
-
     newSocket.on('bidPlaced', ({ bid, nextPlayerIndex, playerName, playerId }) => {
       console.log(`Received bidPlaced event. Bid: ${bid.quantity} ${bid.value}, Next player index: ${nextPlayerIndex}`);
-      setCurrentBid(prevBid => {
-        console.log(`Updating current bid from ${JSON.stringify(prevBid)} to ${JSON.stringify(bid)}`);
-        return bid;
-      });
-      setCurrentPlayerIndex(prevIndex => {
-        console.log(`Updating current player index from ${prevIndex} to ${nextPlayerIndex}`);
-        return nextPlayerIndex;
-      });
+      setCurrentBid(bid);
+      setCurrentPlayerIndex(nextPlayerIndex);
       
-      // Add this condition to include the player's own bids
-      if (playerId === newSocket.id) {
-        playerName = 'You';
-      }
-      
-      const logMessage = `${playerName} bid ${bid.quantity} ${bid.value}'s`;
+      const logMessage = playerId === newSocket.id ? `You bid ${bid.quantity} ${bid.value}'s` : `${playerName} bid ${bid.quantity} ${bid.value}'s`;
       addToGameLog(logMessage);
       setLastAction(logMessage);
     });
-
+  
     newSocket.on('challengeResult', (result) => {
-      addToGameLog(`Challenge result: ${result.actualCount} ${result.bid.value}'s. ${result.loserName} lost a die.`);
+      console.log('Received challenge result:', result);
+      setPlayers(result.players);
     });
-
+  
     newSocket.on('newRound', ({ players, currentPlayerIndex }) => {
+      console.log('Starting new round');
       setPlayers(players);
-      setCurrentBid(null);
       setCurrentPlayerIndex(currentPlayerIndex);
-      setGameStatus('playing');
-      addToGameLog('New round started.');
+      setCurrentBid(null);
     });
-
+  
     newSocket.on('gameOver', ({ winner, reason }) => {
+      console.log('Game over:', reason);
       setGameStatus('gameOver');
       setWinner(winner);
-      addToGameLog(reason ? `Game over: ${reason}` : `Game over! ${winner.name} wins!`);
     });
-
+  
     newSocket.on('playerLeft', ({ playerId, nextPlayerIndex }) => {
       setPlayers(prevPlayers => prevPlayers.filter(p => p.id !== playerId));
       setCurrentPlayerIndex(nextPlayerIndex);
       addToGameLog(`A player has left the game.`);
     });
-
+  
     setSocket(newSocket);
-
-  return () => {
-    newSocket.disconnect();
-  };
-}, [socketUrl, isEndGame]);
+  
+    return () => {
+      newSocket.disconnect();
+      if (newSocket.off) {
+        newSocket.off('challengeResult', handleChallengeResult);
+        newSocket.off('newRound', handleNewRound);
+        newSocket.off('gameOver', handleGameOver);
+      } else {
+        // Reinitialize the socket connection to remove listeners
+        setSocket(null);
+      }
+    };
+  }, [socketUrl, addToGameLog]);
+  
+  
+  
 
   useEffect(() => {
     if (gameMode === 'singlePlayer' && gameStatus === 'playing' && !players[currentPlayerIndex]?.isHuman) {
       const timer = setTimeout(computerTurn, 1000);
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [gameMode, gameStatus, currentPlayerIndex, players, computerTurn]);
+  
+  useEffect(() => {
+    if (gameMode === 'multiplayer' && gameStatus === 'playing') {
+      const currentPlayer = players[currentPlayerIndex];
+      if (currentPlayer && currentPlayer.id !== playerId) {
+        console.log(`${currentPlayer.name} is thinking...`);
+      }
+    }
+  }, [gameMode, gameStatus, currentPlayerIndex, players, playerId]); 
 
   useEffect(() => {
     console.log(`Game state updated. Current player: ${currentPlayerIndex}, Current bid: ${JSON.stringify(currentBid)}`);
   }, [currentPlayerIndex, currentBid]);
 
+  useEffect(() => {
+    console.log('Players state changed:', players);
+    checkEndGameScenario();
+  }, [players]);
+
+  const checkEndGameScenario = () => {
+    console.log('Checking for end game scenario');
+    console.log('Players:', players);
+    console.log('Players count:', players.length);
+    console.log('Players dice count:', players.map(player => player.diceCount));
+
+    if (players.length === 2 && players.every(player => player.diceCount === 1)) {
+      console.log('End game condition met!');
+      setIsEndGame(true);
+      addToGameLog('End game scenario: Only two players with one die each remain!');
+    } else {
+      setIsEndGame(false);
+    }
+  };
   
   const handleSelectSinglePlayer = (playerCount: number) => {
     setGameMode('singlePlayer');
-    const newPlayers = [
-      { id: '1', name: 'You', dice: [], diceCount: TOTAL_DICE, isHuman: true },
+    const newPlayers: Player[] = [
+      { id: '1', name: 'You', dice: [], diceCount: TOTAL_DICE, isHuman: true, connected: true },
       ...Array(playerCount - 1).fill(null).map((_, i) => ({
         id: (i + 2).toString(),
         name: `Computer ${i + 1}`,
         dice: [],
         diceCount: TOTAL_DICE,
-        isHuman: false
+        isHuman: false,
+        connected: true
       }))
     ];
 
@@ -407,17 +525,20 @@ const LiarsDice = () => {
     setPlayerName(name);
     if (socket) {
       console.log("Emitting createRoom event");
-      socket.emit('createRoom', { playerName: name }, (response: { roomCode: string, playerId: string, error?: string }) => {
+      socket.emit('createRoom', { playerName: name }, (response: { success: boolean, roomCode: string, playerId: string, players: Player[], error?: string }) => {
         console.log("Received createRoom response:", response);
-        if (response.error) {
+        if (response.success) {
+          setRoomCode(response.roomCode);
+          setPlayerId(response.playerId);
+          setPlayers(response.players);
+          setGameStatus('waiting');
+          console.log(`Room created: ${response.roomCode}`);
+          // Store room info in localStorage for potential reconnection
+          localStorage.setItem('roomInfo', JSON.stringify({ roomCode: response.roomCode, playerName: name }));
+        } else {
           console.error("Error creating room:", response.error);
           alert("Failed to create room. Please try again.");
-          return;
         }
-        setRoomCode(response.roomCode);
-        setPlayerId(response.playerId);
-        setPlayers([{ id: response.playerId, name: name, dice: [], diceCount: TOTAL_DICE, isHuman: true }]);
-        setGameStatus('waiting');
       });
     }
   };
@@ -456,7 +577,7 @@ const LiarsDice = () => {
         }
       });
     }
-  };
+  };  
 
   const handleCancel = () => {
     setGameMode('start');
@@ -464,11 +585,18 @@ const LiarsDice = () => {
     setPlayers([]);
   };
 
-  const startNewRound = () => {
-    setPlayers(prevPlayers => prevPlayers.map(player => ({
-      ...player,
-      dice: Array.from({ length: player.diceCount }, () => Math.floor(Math.random() * DICE_SIDES) + 1)
-    })));
+  const startNewRound = useCallback(() => {
+    console.log('startNewRound called');
+    setPlayers(prevPlayers => {
+      const updatedPlayers = prevPlayers.map(player => ({
+        ...player,
+        dice: Array.from({ length: player.diceCount }, () => Math.floor(Math.random() * DICE_SIDES) + 1)
+      }));
+  
+      console.log('Updated Players in startNewRound:', updatedPlayers);
+      return updatedPlayers;
+    });
+  
     setCurrentBid(null);
     setGameStatus('playing');
     setCurrentPlayerIndex(0);
@@ -476,29 +604,14 @@ const LiarsDice = () => {
     setBidValue('');
     setLastAction('New round started');
     addToGameLog('New round started.');
-    setWinner(null);  // Reset the winner state
-
-    // Check for end game scenario
-    console.log('Checking for end game scenario');
-
-    // Console log statements to verify conditions for endgame are met
-    console.log('Players:', players);
-    console.log('Players count:', players.length);
-    console.log('Players dice count:', players.map(player => player.diceCount));
-    console.log('Players dice:', players.map(player => player.dice));
-
-
-    // If only two players remain with strictly one die each, set isEndGame to true
-    if (players.length === 2 && players.every(player => player.diceCount === 1)) {
-      setIsEndGame(true);
-      addToGameLog('End game scenario: Only two players with one die each remain!');
-    }
-
+    setWinner(null);
+  
     // If it's single-player mode and the first player is not human, start computer turn
     if (gameMode === 'singlePlayer' && !players[0].isHuman) {
       setTimeout(computerTurn, 1000);
     }
-  };
+  }, [gameMode, players, computerTurn, addToGameLog]);
+  
 
   const isValidBid = (newBid: {quantity: number, value: number}) => {
     if (isEndGame) {
@@ -521,7 +634,7 @@ const LiarsDice = () => {
 
   const placeBid = () => {
     const newBid = { 
-      quantity: parseInt(bidQuantity), 
+      quantity: isEndGame ? 1 : parseInt(bidQuantity), 
       value: parseInt(bidValue) 
     };
     if (!isValidBid(newBid)) {
@@ -534,9 +647,6 @@ const LiarsDice = () => {
     }
     console.log(`Attempting to place bid: ${newBid.quantity} ${newBid.value}`);
     
-    const currentPlayer = players[currentPlayerIndex];
-    setLastBidPlayerId(currentPlayer.id);
-    
     if (gameMode === 'multiplayer' && socket && roomCode) {
       console.log(`Emitting placeBid event to server. RoomCode: ${roomCode}`);
       socket.emit('placeBid', { roomCode, bid: newBid }, (response: any) => {
@@ -545,15 +655,16 @@ const LiarsDice = () => {
           console.error('Failed to place bid:', response.error);
           alert('Failed to place bid. Please try again.');
         }
+        // The state updates will be handled by the 'bidPlaced' event
       });
     } else if (gameMode === 'singlePlayer') {
+      // Single-player logic
       setCurrentBid(newBid);
-      const logMessage = `${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`;
+      const logMessage = `You bid ${newBid.quantity} ${newBid.value}'s`;
       addToGameLog(logMessage);
       setLastAction(logMessage);
       
       const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
-      console.log(`Next player index: ${nextPlayerIndex}`);
       setCurrentPlayerIndex(nextPlayerIndex);
       
       if (!players[nextPlayerIndex].isHuman) {
@@ -564,7 +675,7 @@ const LiarsDice = () => {
     setBidQuantity('');
     setBidValue('');
   };
-
+  
   if (gameMode === 'start') {
     return (
       <StartScreen 
@@ -610,11 +721,12 @@ const LiarsDice = () => {
                 <CardHeader>
                   <h2 className="text-xl font-semibold">{player.name}</h2>
                   <p>Dice: {player.diceCount}</p>
+                  <p>{player.connected ? 'Connected' : 'Disconnected'}</p>
                 </CardHeader>
                 <CardContent className="flex flex-wrap justify-center items-center gap-2 p-4">
                   {((gameMode === 'singlePlayer' && player.isHuman) || (gameMode === 'multiplayer' && player.id === playerId)) ? (
-                    player.dice.map((die, i) => (
-                      <DiceIcon key={i} value={die} hidden={false} />
+                    Array(player.diceCount).fill(0).map((_, i) => (
+                      <DiceIcon key={i} value={player.dice[i] || 1} hidden={false} />
                     ))
                   ) : (
                     Array(player.diceCount).fill(0).map((_, i) => (
