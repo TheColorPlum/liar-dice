@@ -327,14 +327,14 @@ const LiarsDice = () => {
     };
       
     
-    const handleNewRound = ({ players, currentPlayerIndex }) => {
+    const handleNewRound = ({ players, currentPlayerIndex }: { players: Player[], currentPlayerIndex: number }) => {
       console.log('Starting new round');
       setPlayers(players);
       setCurrentPlayerIndex(currentPlayerIndex);
       setCurrentBid(null);
     };
     
-    const handleGameOver = ({ winner, reason }) => {
+    const handleGameOver = ({ winner, reason }: { winner: { id: string; name: string }, reason: string }) => {
       console.log('Game over:', reason);
       setGameStatus('gameOver');
       setWinner(winner);
@@ -402,7 +402,7 @@ const LiarsDice = () => {
       setConnectionError('Error connecting to game server. Please try again later.');
     });
   
-    newSocket.on('playerJoined', (newPlayer) => {
+    newSocket.on('playerJoined', (newPlayer: Player) => {
       console.log('Player joined event received', newPlayer);
       setPlayers(prevPlayers => [...prevPlayers, newPlayer]);
       addToGameLog(`${newPlayer.name} joined the game.`);
