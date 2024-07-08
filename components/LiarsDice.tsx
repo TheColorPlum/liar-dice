@@ -329,10 +329,11 @@ const LiarsDice = () => {
     
     const handleNewRound = ({ players, currentPlayerIndex }: { players: Player[], currentPlayerIndex: number }) => {
       console.log('Starting new round');
-      setPlayers(players);
+      setPlayers(players);  // Use the players data (including dice) provided by the server
       setCurrentPlayerIndex(currentPlayerIndex);
       setCurrentBid(null);
     };
+    
     
     const handleGameOver = ({ winner, reason }: { winner: { id: string; name: string }, reason: string }) => {
       console.log('Game over:', reason);
@@ -619,6 +620,7 @@ const LiarsDice = () => {
       setTimeout(computerTurn, 1000);
     }
   }, [gameMode, players, computerTurn, addToGameLog]);
+  
   
 
   const isValidBid = (newBid: {quantity: number, value: number}) => {

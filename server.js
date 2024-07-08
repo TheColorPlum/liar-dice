@@ -118,6 +118,9 @@ io.on('connection', (socket) => {
           player.dice = rollDice(player.diceCount);
           player.connected = true;
         });
+
+        // Randomly select the first player
+        room.currentPlayerIndex = Math.floor(Math.random() * room.players.length);
         
         console.log(`Starting game in room ${roomCode}`);
         io.in(roomCode).emit('gameStarted', { 
@@ -210,7 +213,7 @@ io.on('connection', (socket) => {
           actualCount: totalValue,
           bid: currentBid,
           outcome: challengeOutcome,
-          players: room.players // Include the updated players list
+          players: room.players
         };
   
         io.to(roomCode).emit('challengeResult', challengeResult);
@@ -225,7 +228,16 @@ io.on('connection', (socket) => {
         } else {
           room.currentPlayerIndex = loserIndex % room.players.length;
           room.currentBid = null;
-          io.to(roomCode).emit('newRound', { players: room.players, currentPlayerIndex: room.currentPlayerIndex });
+          
+          // Randomize dice for all players
+          room.players.forEach(player => {
+            player.dice = rollDice(player.diceCount);
+          });
+  
+          io.to(roomCode).emit('newRound', { 
+            players: room.players, 
+            currentPlayerIndex: room.currentPlayerIndex 
+          });
         }
   
         rooms.set(roomCode, room);
