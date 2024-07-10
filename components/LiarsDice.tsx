@@ -147,74 +147,23 @@ const LiarsDice = () => {
     });
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const computerTurn = () => {
-    const currentPlayer = players[currentPlayerIndex];
-    if (currentPlayer.isHuman) {
-      console.error("Computer turn called for human player");
-      return;
-    }
-    console.log(`Computer ${currentPlayer.name}'s turn`);
-    const ownDice = currentPlayer.dice;
-    const totalDice = players.reduce((sum, player) => sum + player.diceCount, 0);
-    
-    let newBid;
+  const isValidBid = (newBid: {quantity: number, value: number}) => {
     if (isEndGame) {
-      const ownDie = currentPlayer.dice[0];
-      if (!currentBid) {
-        newBid = { quantity: 1, value: Math.min(ownDie + 3, 12) };
-      } else {
-        newBid = { quantity: 1, value: Math.min(currentBid.value + 1, 12) };
-      }
+      if (!newBid.value || newBid.value < 2 || newBid.value > 12) return false;
+      if (!currentBid) return true;
+      return newBid.value > currentBid.value;
     } else {
-      if (!currentBid) {
-        const mostCommonValue = [...Array(6)].map((_, i) => 
-          ownDice.filter(d => d === i + 1 || d === 1).length
-        ).indexOf(Math.max(...[...Array(6)].map((_, i) => 
-          ownDice.filter(d => d === i + 1 || d === 1).length
-        ))) + 1;
-        
-        newBid = { 
-          quantity: Math.max(1, Math.floor(ownDice.filter(d => d === mostCommonValue || d === 1).length * 1.5)), 
-          value: mostCommonValue 
-        };
-      } else {
-        const ownCount = ownDice.filter(die => die === currentBid.value || die === 1).length;
-        const estimatedTotal = Math.round(ownCount * (totalDice / currentPlayer.diceCount));
-        const confidenceThreshold = 0.7;
-  
-        if (estimatedTotal < currentBid.quantity * confidenceThreshold) {
-          console.log("Computer decides to challenge");
-          challenge();
-          return;
-        } else {
-          let attempts = 0;
-          do {
-            let newQuantity = currentBid.quantity;
-            let newValue = currentBid.value;
-  
-            if (Math.random() < 0.7) {
-              newQuantity++;
-            } else {
-              newValue = Math.min(newValue + 1, DICE_SIDES);
-              if (newValue === currentBid.value) newQuantity++;
-            }
-  
-            newBid = { quantity: newQuantity, value: newValue };
-            attempts++;
-            if (attempts > 10) break;  // Prevent infinite loop
-          } while (!isValidBid(newBid));
-        }
+      if (!newBid.quantity || newBid.quantity <= 0 || !newBid.value || newBid.value < 2 || newBid.value > 6) {
+        return false;
       }
+      if (!currentBid) return true;
+      if (newBid.quantity < currentBid.quantity) return false;
+      if (newBid.quantity === currentBid.quantity) {
+        if (currentBid.value === 6) return false;
+        return newBid.value > currentBid.value;
+      }
+      return true;
     }
-    
-    console.log(`Computer places bid: ${newBid.quantity} ${newBid.value}`);
-  setCurrentBid(newBid);
-  addToGameLog(`${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`);
-
-  const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
-  setCurrentPlayerIndex(nextPlayerIndex);
-  setLastAction(`${players[nextPlayerIndex].name}'s turn`);
   };
 
   const challenge = () => {
@@ -298,6 +247,105 @@ const LiarsDice = () => {
       }
     }
   };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const computerTurn = useCallback(() => {
+    const currentPlayer = players[currentPlayerIndex];
+    if (currentPlayer.isHuman) {
+      console.error("Computer turn called for human player");
+      return;
+    }
+    console.log(`Computer ${currentPlayer.name}'s turn`);
+    
+    const ownDice = currentPlayer.dice;
+    const totalDice = players.reduce((sum, player) => sum + player.diceCount, 0);
+    const remainingDice = totalDice - currentPlayer.diceCount;
+    
+    let newBid;
+    if (isEndGame) {
+      // End game strategy
+      const ownDie = currentPlayer.dice[0];
+      if (!currentBid) {
+        // Initial bid in end game
+        newBid = { quantity: 1, value: Math.min(ownDie + Math.floor(Math.random() * 3) + 1, MAX_END_GAME_BID) };
+      } else {
+        // Subsequent bids in end game
+        const riskFactor = Math.random();
+        if (riskFactor < 0.3) {
+          // 30% chance to challenge
+          challenge();
+          return;
+        } else {
+          // 70% chance to increase bid
+          newBid = { quantity: 1, value: Math.min(currentBid.value + 1, MAX_END_GAME_BID) };
+        }
+      }
+    } else {
+      // Normal game strategy
+      const diceCount = (value: number) => ownDice.filter(d => d === value || d === 1).length;
+      const ownCounts = [...Array(6)].map((_, i) => diceCount(i + 1));
+      const mostCommonValue = ownCounts.indexOf(Math.max(...ownCounts)) + 1;
+      
+      if (!currentBid) {
+        // Initial bid
+        const quantity = Math.max(1, Math.floor(diceCount(mostCommonValue) * (totalDice / currentPlayer.diceCount) * 0.8));
+        newBid = { quantity, value: mostCommonValue };
+      } else {
+        const ownCount = diceCount(currentBid.value);
+        const estimatedTotal = Math.round(ownCount * (totalDice / currentPlayer.diceCount));
+        const confidenceThreshold = 0.6 + (Math.random() * 0.2); // Dynamic confidence threshold
+        
+        if (estimatedTotal < currentBid.quantity * confidenceThreshold) {
+          // Challenge if the estimated total is significantly lower than the current bid
+          const challengeProbability = 1 - (estimatedTotal / (currentBid.quantity * confidenceThreshold));
+          if (Math.random() < challengeProbability) {
+            console.log("Computer decides to challenge");
+            challenge();
+            return;
+          }
+        }
+        
+        // Decide on a new bid
+        const riskFactor = Math.random();
+        if (riskFactor < 0.4) {
+          // Increase quantity
+          newBid = { quantity: currentBid.quantity + 1, value: currentBid.value };
+        } else if (riskFactor < 0.7) {
+          // Increase value
+          newBid = { quantity: currentBid.quantity, value: Math.min(currentBid.value + 1, DICE_SIDES) };
+        } else {
+          // Increase both (more aggressive)
+          newBid = { 
+            quantity: currentBid.quantity + 1, 
+            value: Math.min(currentBid.value + 1, DICE_SIDES)
+          };
+        }
+        
+        // Adjust bid based on probability
+        const probability = (newBid.quantity / totalDice) * (1/6 + (newBid.value === 1 ? 1/6 : 0));
+        if (probability > 0.8) {
+          // If probability is too high, reduce the bid
+          newBid.quantity = Math.max(currentBid.quantity, Math.floor(newBid.quantity * 0.8));
+        }
+      }
+    }
+    
+    // Ensure the bid is valid
+    if (!isValidBid(newBid)) {
+      // If the generated bid is invalid, default to the safest valid bid
+      newBid = isEndGame
+        ? { quantity: 1, value: Math.min((currentBid?.value || 1) + 1, MAX_END_GAME_BID) }
+        : { quantity: (currentBid?.quantity || 0) + 1, value: currentBid?.value || MIN_BID_VALUE };
+    }
+    
+    console.log(`Computer places bid: ${newBid.quantity} ${newBid.value}`);
+    setCurrentBid(newBid);
+    addToGameLog(`${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`);
+  
+    const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
+    setCurrentPlayerIndex(nextPlayerIndex);
+    setLastAction(`${players[nextPlayerIndex].name}'s turn`);
+  }, [players, currentPlayerIndex, isEndGame, currentBid, challenge, isValidBid, addToGameLog, setCurrentBid, setCurrentPlayerIndex, setLastAction]);
   
 
   useEffect(() => {
@@ -631,27 +679,6 @@ const LiarsDice = () => {
     // Remove the immediate call to computerTurn
     // Instead, we'll rely on the useEffect hook to handle turns
   }, [players, addToGameLog]);
-  
-  
-
-  const isValidBid = (newBid: {quantity: number, value: number}) => {
-    if (isEndGame) {
-      if (!newBid.value || newBid.value < 2 || newBid.value > 12) return false;
-      if (!currentBid) return true;
-      return newBid.value > currentBid.value;
-    } else {
-      if (!newBid.quantity || newBid.quantity <= 0 || !newBid.value || newBid.value < 2 || newBid.value > 6) {
-        return false;
-      }
-      if (!currentBid) return true;
-      if (newBid.quantity < currentBid.quantity) return false;
-      if (newBid.quantity === currentBid.quantity) {
-        if (currentBid.value === 6) return false;
-        return newBid.value > currentBid.value;
-      }
-      return true;
-    }
-  };
 
   const placeBid = () => {
     const newBid = { 
