@@ -142,7 +142,8 @@ const LiarsDice = () => {
       if (unique && prevLog.some(log => log.message === entry)) {
         return prevLog; // Don't add duplicate unique messages
       }
-      return [...prevLog, { id: Date.now() + Math.random(), message: entry }];
+      // Add new entry to the beginning of the array
+      return [{ id: Date.now() + Math.random(), message: entry }, ...prevLog];
     });
   }, []);
 
@@ -208,14 +209,12 @@ const LiarsDice = () => {
     }
     
     console.log(`Computer places bid: ${newBid.quantity} ${newBid.value}`);
-    setCurrentBid(newBid);
-    addToGameLog(`${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`);
-    const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
-    setCurrentPlayerIndex(nextPlayerIndex);
-    
-    if (!players[nextPlayerIndex].isHuman) {
-      setTimeout(() => computerTurn(), 1000);
-    }
+  setCurrentBid(newBid);
+  addToGameLog(`${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`);
+
+  const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
+  setCurrentPlayerIndex(nextPlayerIndex);
+  setLastAction(`${players[nextPlayerIndex].name}'s turn`);
   };
 
   const challenge = () => {
@@ -264,7 +263,7 @@ const LiarsDice = () => {
   
       const updatedPlayers = [...players];
       updatedPlayers[loserIndex].diceCount--;
-      updatedPlayers[loserIndex].dice = updatedPlayers[loserIndex].dice.slice(0, updatedPlayers[loserIndex].diceCount); // Update dice array
+      updatedPlayers[loserIndex].dice = updatedPlayers[loserIndex].dice.slice(0, updatedPlayers[loserIndex].diceCount);
   
       const challengeResult = {
         challengerName: players[challengerIndex].name,
@@ -276,7 +275,7 @@ const LiarsDice = () => {
         actualCount: totalValue,
         bid: currentBid,
         outcome: challengeOutcome,
-        players: updatedPlayers // Include updated players list
+        players: updatedPlayers
       };
   
       if (isEndGame) {
@@ -294,10 +293,8 @@ const LiarsDice = () => {
         setWinner(updatedPlayers[0]);
       } else {
         setPlayers(updatedPlayers);
-        setCurrentPlayerIndex(loserIndex % updatedPlayers.length);
-        setCurrentBid(null);
-        console.log('Starting new round after challenge');
-        startNewRound();
+        // Instead of calling startNewRound directly, schedule it for the next tick
+        setTimeout(() => startNewRound(loserIndex as number), 0);
       }
     }
   };
@@ -470,9 +467,14 @@ const LiarsDice = () => {
   
 
   useEffect(() => {
-    if (gameMode === 'singlePlayer' && gameStatus === 'playing' && !players[currentPlayerIndex]?.isHuman) {
-      const timer = setTimeout(computerTurn, 1000);
-      return () => clearTimeout(timer);
+    if (gameMode === 'singlePlayer' && gameStatus === 'playing') {
+      const currentPlayer = players[currentPlayerIndex];
+      if (currentPlayer && !currentPlayer.isHuman) {
+        const timer = setTimeout(() => {
+          computerTurn();
+        }, 1000);
+        return () => clearTimeout(timer);
+      }
     }
   }, [gameMode, gameStatus, currentPlayerIndex, players, computerTurn]);
   
@@ -594,7 +596,7 @@ const LiarsDice = () => {
     setPlayers([]);
   };
 
-  const startNewRound = useCallback(() => {
+  const startNewRound = useCallback((startingPlayerIndex?: number) => {
     console.log('startNewRound called');
     setPlayers(prevPlayers => {
       const updatedPlayers = prevPlayers.map(player => ({
@@ -608,18 +610,27 @@ const LiarsDice = () => {
   
     setCurrentBid(null);
     setGameStatus('playing');
-    setCurrentPlayerIndex(0);
+    
+    // Determine the starting player for the new round
+    let newCurrentPlayerIndex;
+    if (startingPlayerIndex !== undefined) {
+      // If the starting player was eliminated, find the next player
+      newCurrentPlayerIndex = startingPlayerIndex % players.length;
+    } else {
+      // If no starting player is specified (e.g., for the very first round), start with player 0
+      newCurrentPlayerIndex = 0;
+    }
+    setCurrentPlayerIndex(newCurrentPlayerIndex);
+  
     setBidQuantity('');
     setBidValue('');
     setLastAction('New round started');
     addToGameLog('New round started.');
     setWinner(null);
   
-    // If it's single-player mode and the first player is not human, start computer turn
-    if (gameMode === 'singlePlayer' && !players[0].isHuman) {
-      setTimeout(computerTurn, 1000);
-    }
-  }, [gameMode, players, computerTurn, addToGameLog]);
+    // Remove the immediate call to computerTurn
+    // Instead, we'll rely on the useEffect hook to handle turns
+  }, [players, addToGameLog]);
   
   
 
@@ -668,7 +679,6 @@ const LiarsDice = () => {
         // The state updates will be handled by the 'bidPlaced' event
       });
     } else if (gameMode === 'singlePlayer') {
-      // Single-player logic
       setCurrentBid(newBid);
       const logMessage = `You bid ${newBid.quantity} ${newBid.value}'s`;
       addToGameLog(logMessage);
@@ -676,10 +686,9 @@ const LiarsDice = () => {
       
       const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
       setCurrentPlayerIndex(nextPlayerIndex);
-      
-      if (!players[nextPlayerIndex].isHuman) {
-        setTimeout(() => computerTurn(), 1000);
-      }
+  
+      // Remove the immediate computerTurn call
+      setLastAction(`${players[nextPlayerIndex].name}'s turn`);
     }
     
     setBidQuantity('');
