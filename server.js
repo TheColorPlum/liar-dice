@@ -1,20 +1,32 @@
 const express = require('express');
-const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const fs = require('fs');
 
 const app = express();
-const server = http.createServer(app);
+
+// SSL configuration
+const sslOptions = {
+  key: process.env.SSL_KEY_PATH ? fs.readFileSync(process.env.SSL_KEY_PATH) : null,
+  cert: process.env.SSL_CERT_PATH ? fs.readFileSync(process.env.SSL_CERT_PATH) : null
+};
+
+// Create server based on SSL availability
+const server = process.env.SSL_KEY_PATH && process.env.SSL_CERT_PATH
+  ? https.createServer(sslOptions, app)
+  : require('http').createServer(app);
+
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://107.22.150.134:3000"],
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000", "http://107.22.150.134:3000"],
     methods: ["GET", "POST"],
     credentials: true
   }
 });
 
 app.use(cors({
-  origin: ["http://localhost:3000", "http://107.22.150.134:3000"],
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000", "http://107.22.150.134:3000"],
   credentials: true
 }));
 app.use(express.json());
@@ -322,5 +334,6 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3002;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+  const protocol = process.env.SSL_KEY_PATH && process.env.SSL_CERT_PATH ? 'https' : 'http';
+  console.log(`Server running on ${protocol}://0.0.0.0:${PORT}`);
 });
