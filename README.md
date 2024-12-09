@@ -1,36 +1,117 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Liar's Dice Game
 
-## Getting Started
+A multiplayer implementation of the classic Liar's Dice game using Next.js, TypeScript, and WebSocket for real-time gameplay.
 
-First, run the development server:
+## Project Structure
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+liar-dice/
+├── app/                    # Next.js app directory
+├── components/            # React components
+│   ├── GameBoard.tsx     # Main game board display
+│   ├── GameControls.tsx  # Game control buttons and setup screens
+│   ├── GameLog.tsx       # Game event log display
+│   └── LiarsDice.tsx     # Main game component
+├── types/                # TypeScript type definitions
+│   └── game.ts          # Game-related types and constants
+├── utils/               # Utility functions
+│   ├── computerAI.ts    # Computer player logic
+│   ├── gameLogic.ts     # Core game rules and logic
+│   └── socketHandler.ts # WebSocket communication handler
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Single player mode with AI opponents
+- Multiplayer mode with real-time gameplay
+- Customizable number of players (2-6)
+- Game log tracking all actions
+- End-game scenarios
+- Automatic dice rolling
+- Challenge system
+- Room-based multiplayer
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+## Game Rules
 
-## Learn More
+1. Each player starts with 5 dice
+2. Players take turns making bids about the total number of dice showing a particular value
+3. A bid consists of a quantity and a value (e.g., "four 3's")
+4. Each new bid must be higher than the previous bid (either in quantity or value)
+5. Players can challenge the previous bid if they think it's false
+6. Ones (1's) are wild and count as any value
+7. The loser of each round loses one die
+8. Players are eliminated when they lose all their dice
+9. The last player with dice wins
 
-To learn more about Next.js, take a look at the following resources:
+### End Game Rules
+- When only two players remain with one die each, the bidding changes
+- Players only bid on the total value of both dice
+- The higher bid wins unless challenged
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Technical Implementation
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+### Components
 
-## Deploy on Vercel
+- **GameBoard**: Handles the display of players, dice, and current game state
+- **GameControls**: Manages game setup and control actions
+- **GameLog**: Displays a scrollable history of game events
+- **LiarsDice**: Main component orchestrating game flow
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Utilities
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+- **computerAI.ts**: Implements computer player strategy
+  - Probability-based decision making
+  - Dynamic risk assessment
+  - Adaptive bidding strategy
+
+- **gameLogic.ts**: Core game mechanics
+  - Bid validation
+  - Challenge resolution
+  - Game state management
+
+- **socketHandler.ts**: Real-time communication
+  - WebSocket event handling
+  - Room management
+  - Player synchronization
+
+## Setup and Running
+
+1. Install dependencies:
+```bash
+npm install
+```
+
+2. Start the development server:
+```bash
+npm run dev
+```
+
+3. Open [http://localhost:3000](http://localhost:3000) in your browser
+
+## Development
+
+### Adding New Features
+
+1. Define types in `types/game.ts`
+2. Implement game logic in `utils/`
+3. Create/update components in `components/`
+4. Update socket handlers if needed
+
+### Testing
+
+Run the test suite:
+```bash
+npm test
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+MIT License - feel free to use this code for your own projects!

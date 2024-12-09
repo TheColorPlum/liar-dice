@@ -7,7 +7,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3001",
+    origin: process.env.CLIENT_URL || "http://localhost:3000",
     methods: ["GET", "POST"]
   }
 });
@@ -44,7 +44,14 @@ io.on('connection', (socket) => {
     console.log(`Creating room for player: ${playerName}`);
     try {
       const roomCode = generateRoomCode();
-      const newPlayer = { id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true, connected: true };
+      const newPlayer = { 
+        id: socket.id, 
+        name: playerName, 
+        dice: [], 
+        diceCount: TOTAL_DICE, 
+        isHuman: true, 
+        connected: true 
+      };
       const room = { 
         players: [newPlayer],
         gameState: 'waiting',
@@ -89,7 +96,14 @@ io.on('connection', (socket) => {
     try {
       const room = rooms.get(roomCode);
       if (room && room.gameState === 'waiting') {
-        const newPlayer = { id: socket.id, name: playerName, dice: [], diceCount: TOTAL_DICE, isHuman: true, connected: true };
+        const newPlayer = { 
+          id: socket.id, 
+          name: playerName, 
+          dice: [], 
+          diceCount: TOTAL_DICE, 
+          isHuman: true, 
+          connected: true 
+        };
         room.players.push(newPlayer);
         socket.join(roomCode);
         console.log(`Player ${playerName} joined room ${roomCode}. Total players: ${room.players.length}`);
@@ -109,7 +123,7 @@ io.on('connection', (socket) => {
     console.log(`Received startGame event for room ${roomCode}`);
     try {
       const room = rooms.get(roomCode);
-      if (room && room.gameState === 'waiting') {
+      if (room && room.gameState === 'waiting' && room.players.length >= 2) {
         room.gameState = 'playing';
         room.currentPlayerIndex = 0;
         room.currentBid = null;
@@ -132,7 +146,7 @@ io.on('connection', (socket) => {
         callback({ success: true });
       } else {
         console.log(`Failed to start game in room ${roomCode}. Room state: ${room ? room.gameState : 'not found'}`);
-        callback({ success: false, message: 'Room not found or game already started' });
+        callback({ success: false, message: room ? 'Not enough players or game already started' : 'Room not found' });
       }
     } catch (error) {
       console.error('Error in startGame:', error);
@@ -250,7 +264,42 @@ io.on('connection', (socket) => {
       console.error('Error in challenge:', error);
       if (callback) callback({ success: false, error: error.message });
     }
-  });    
+  });
+  
+  socket.on('resetGame', ({ roomCode, players }, callback) => {
+    console.log(`Received resetGame event for room ${roomCode}`);
+
+    const room = rooms.get(roomCode);
+    if (!room) {
+      console.error(`Room ${roomCode} not found`);
+      callback({ success: false, message: 'Room not found' });
+      return;
+    }
+
+    try {
+      // Update the room's game state
+      room.players = players;
+      room.currentPlayerIndex = 0;
+      room.currentBid = null;
+      room.gameState = 'playing';
+
+      // Save the updated room state
+      rooms.set(roomCode, room);
+
+      // Broadcast the reset game state to all players in the room
+      io.to(roomCode).emit('gameReset', {
+        players: room.players,
+        currentPlayerIndex: 0,
+        gameStatus: 'playing'
+      });
+
+      console.log(`Game reset successfully for room ${roomCode}`);
+      callback({ success: true });
+    } catch (error) {
+      console.error(`Error resetting game for room ${roomCode}:`, error);
+      callback({ success: false, message: 'Error resetting game' });
+    }
+  });
   
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
@@ -267,7 +316,7 @@ io.on('connection', (socket) => {
   });
 });  
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });

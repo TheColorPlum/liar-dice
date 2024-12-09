@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import LiarsDice from '@/components/LiarsDice';
+import LiarsDice from '../components/LiarsDice';
 
 jest.mock('socket.io-client', () => {
   const mSocket = {

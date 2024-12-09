@@ -9,7 +9,7 @@
     "lint": "next lint",
     "server": "node server.js",
     "test": "jest",
-    "dev:all": "concurrently \"node server.js\" \"next start\""
+    "dev:all": "concurrently \"node server.js\" \"next dev\""
   },
   "dependencies": {
     "@radix-ui/react-scroll-area": "^1.1.0",
@@ -43,6 +43,7 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@types/ws": "^8.5.13",
     "concurrently": "^8.2.2",
     "eslint": "^8",
     "eslint-config-next": "14.2.4",
