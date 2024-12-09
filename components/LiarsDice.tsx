@@ -210,12 +210,17 @@ const LiarsDice: React.FC = () => {
         updatedPlayers.splice(loserIndex, 1);
       }
 
+      setPlayers(updatedPlayers);
+      
       if (updatedPlayers.length <= 1) {
         setGameStatus('gameOver');
         setWinner(updatedPlayers[0]);
       } else {
-        setPlayers(updatedPlayers);
-        setTimeout(() => startNewRound(loserIndex), 0);
+        // Ensure state is synchronized by using a callback
+        setPlayers(currentPlayers => {
+          startNewRound(loserIndex);
+          return currentPlayers;
+        });
       }
     }
   };
