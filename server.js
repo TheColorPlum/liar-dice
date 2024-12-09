@@ -1,31 +1,23 @@
 const express = require('express');
-const https = require('https');
+const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
 
 const app = express();
 
-// SSL configuration
-const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, 'privkey.pem')),
-  cert: fs.readFileSync(path.join(__dirname, 'fullchain.pem'))
-};
-
-// Create HTTPS server
-const server = https.createServer(sslOptions, app);
+// Create HTTP server
+const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000", "http://107.22.150.134:3000"],
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000", "http://107.22.150.134:3000", "https://lie-die.com"],
     methods: ["GET", "POST"],
     credentials: true
   }
 });
 
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000", "http://107.22.150.134:3000"],
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000", "http://107.22.150.134:3000", "https://lie-die.com"],
   credentials: true
 }));
 app.use(express.json());
@@ -333,5 +325,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3002;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on https://0.0.0.0:${PORT}`);
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
