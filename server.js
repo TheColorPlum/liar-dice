@@ -247,7 +247,9 @@ io.on('connection', (socket) => {
           room.gameState = 'gameOver';
           io.to(roomCode).emit('gameOver', { winner: room.players[0], reason: `${room.players[0].name} wins!` });
         } else {
+          // Set the loser as the first bidder for the next round
           room.currentPlayerIndex = loserIndex % room.players.length;
+          // Reset the bid state
           room.currentBid = null;
           
           // Randomize dice for all players
@@ -255,9 +257,11 @@ io.on('connection', (socket) => {
             player.dice = rollDice(player.diceCount);
           });
   
+          // Send both the new player order and reset bid state
           io.to(roomCode).emit('newRound', { 
             players: room.players, 
-            currentPlayerIndex: room.currentPlayerIndex 
+            currentPlayerIndex: room.currentPlayerIndex,
+            currentBid: null  // Explicitly send null bid state
           });
         }
   

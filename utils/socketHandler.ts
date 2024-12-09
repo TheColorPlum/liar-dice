@@ -18,6 +18,11 @@ interface SocketCallbacks {
     playerId: string;
   }) => void;
   onChallengeResult?: (result: ChallengeResult) => void;
+  onNewRound?: (data: {
+    players: Player[];
+    currentPlayerIndex: number;
+    currentBid: Bid | null;
+  }) => void;
   onGameOver?: (data: { winner: { id: string; name: string }; reason: string }) => void;
   onRoomUpdate?: (data: { players: Player[] }) => void;
   onPlayerReconnected?: (data: { playerName: string; playerIndex: number }) => void;
@@ -95,6 +100,11 @@ export class SocketHandler {
     this.socket.on('challengeResult', (result) => {
       console.log('Challenge result received', result);
       this.callbacks.onChallengeResult?.(result);
+    });
+
+    this.socket.on('newRound', (data) => {
+      console.log('New round event received', data);
+      this.callbacks.onNewRound?.(data);
     });
 
     this.socket.on('gameOver', (data) => {

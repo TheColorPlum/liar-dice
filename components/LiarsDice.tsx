@@ -74,6 +74,13 @@ const LiarsDice: React.FC = () => {
           true
         );
       },
+      onNewRound: ({ players, currentPlayerIndex, currentBid }) => {
+        setPlayers(players);
+        setCurrentPlayerIndex(currentPlayerIndex);
+        setCurrentBid(currentBid); // This will be null from server
+        setLastAction(`New round started. ${players[currentPlayerIndex].name}'s turn`);
+        addToGameLog('New round started.');
+      },
       onGameOver: ({ winner, reason }) => {
         setGameStatus('gameOver');
         setWinner(winner);
