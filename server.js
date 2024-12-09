@@ -3,19 +3,18 @@ const https = require('https');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const fs = require('fs');
+const path = require('path');
 
 const app = express();
 
 // SSL configuration
 const sslOptions = {
-  key: process.env.SSL_KEY_PATH ? fs.readFileSync(process.env.SSL_KEY_PATH) : null,
-  cert: process.env.SSL_CERT_PATH ? fs.readFileSync(process.env.SSL_CERT_PATH) : null
+  key: fs.readFileSync(path.join(__dirname, 'privkey.pem')),
+  cert: fs.readFileSync(path.join(__dirname, 'fullchain.pem'))
 };
 
-// Create server based on SSL availability
-const server = process.env.SSL_KEY_PATH && process.env.SSL_CERT_PATH
-  ? https.createServer(sslOptions, app)
-  : require('http').createServer(app);
+// Create HTTPS server
+const server = https.createServer(sslOptions, app);
 
 const io = new Server(server, {
   cors: {
@@ -334,6 +333,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3002;
 server.listen(PORT, '0.0.0.0', () => {
-  const protocol = process.env.SSL_KEY_PATH && process.env.SSL_CERT_PATH ? 'https' : 'http';
-  console.log(`Server running on ${protocol}://0.0.0.0:${PORT}`);
+  console.log(`Server running on https://0.0.0.0:${PORT}`);
 });
