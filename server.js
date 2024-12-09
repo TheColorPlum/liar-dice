@@ -7,12 +7,16 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
-    methods: ["GET", "POST"]
+    origin: ["http://localhost:3000", "http://107.22.150.134:3000"],
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
-app.use(cors());
+app.use(cors({
+  origin: ["http://localhost:3000", "http://107.22.150.134:3000"],
+  credentials: true
+}));
 app.use(express.json());
 
 const TOTAL_DICE = 5;
