@@ -23,10 +23,15 @@ export interface Bid {
  */
 export interface ChallengeResult {
   players: Player[];
-  outcome: string;
+  outcome: 'succeeded' | 'failed';
   actualCount: number;
-  bid: { value: number };
+  bid: Bid;
   loserName: string;
+  challengerName: string;
+  bidderName: string;
+  challengerIndex: number;
+  bidderIndex: number;
+  loserIndex: number;
 }
 
 /**
@@ -45,7 +50,7 @@ export type GameStatus = 'waiting' | 'playing' | 'roundEnd' | 'gameOver';
 /**
  * Game mode types
  */
-export type GameMode = 'start' | 'singlePlayer' | 'multiplayer' | 'joinGame' | 'playing';
+export type GameMode = 'start' | 'create' | 'join' | 'singlePlayer' | 'multiplayer' | 'joinGame' | 'playing';
 
 /**
  * Game constants

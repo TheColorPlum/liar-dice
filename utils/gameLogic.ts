@@ -101,12 +101,12 @@ export const resolveChallengeOutcome = (
       outcome = 'failed';
     }
   } else {
-    if (actualCount >= currentBid.quantity) {
-      loserIndex = challengerIndex;
-      outcome = 'failed';
-    } else {
+    if (actualCount < currentBid.quantity) {
       loserIndex = bidderIndex;
       outcome = 'succeeded';
+    } else {
+      loserIndex = challengerIndex;
+      outcome = 'failed';
     }
   }
   

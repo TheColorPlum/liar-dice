@@ -1,374 +1,300 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
-import GameBoard from './GameBoard';
-import GameLog, { addLogEntry } from './GameLog';
-import GameControls from './GameControls';
+import { useState, useEffect, useCallback } from 'react';
+import { createRoom, joinRoom, startGame, placeBid, challenge, cleanup } from '../lib/socket';
+import { Player, Bid, GameStatus, GameMode, GameLogEntry } from '../types/game';
+import { generateComputerMove } from '../utils/computerAI';
+import { isValidBid, rollDice, isEndGameScenario, resolveChallengeOutcome } from '../utils/gameLogic';
 import StartScreen from './StartScreen';
 import JoinGame from './JoinGame';
 import WaitingRoom from './WaitingRoom';
-import socketHandler, { cleanup } from '../lib/socket';
-import { generateComputerMove } from '../utils/computerAI';
-import { isValidBid, rollDice, isEndGameScenario, resolveChallengeOutcome } from '../utils/gameLogic';
-import { Player, Bid, GameStatus, GameMode, GameLogEntry, GAME_CONSTANTS } from '../types/game';
+import GameBoard from './GameBoard';
+import GameLog, { createLogEntry } from './GameLog';
+import socketHandler from '../lib/socket';
+
+type CreateRoomResponse = {
+  success: boolean;
+  roomCode?: string;
+  playerId?: string;
+  players?: Player[];
+  error?: string;
+  message?: string;
+};
+
+type GamePlayMode = 'singlePlayer' | 'multiplayer';
 
 const LiarsDice: React.FC = () => {
-  // Game state
-  const [gameMode, setGameMode] = useState<GameMode>('start');
-  const [gameStatus, setGameStatus] = useState<GameStatus>('waiting');
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [currentPlayerIndex, setCurrentPlayerIndex] = useState<number>(0);
-  const [currentBid, setCurrentBid] = useState<Bid | null>(null);
-  const [lastAction, setLastAction] = useState<string>('');
-  const [isEndGame, setIsEndGame] = useState<boolean>(false);
-  const [winner, setWinner] = useState<{id: string; name: string} | null>(null);
-  const [gameLog, setGameLog] = useState<GameLogEntry[]>([]);
-  const [joinMode, setJoinMode] = useState<'join' | 'create'>('join');
-
-  // Multiplayer state
-  const [roomCode, setRoomCode] = useState<string | null>(null);
-  const [playerId, setPlayerId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [roomCode, setRoomCode] = useState<string>('');
+  const [playerId, setPlayerId] = useState<string>('');
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [gameStatus, setGameStatus] = useState<GameStatus>('waiting');
+  const [gameMode, setGameMode] = useState<GameMode>('start');
+  const [currentBid, setCurrentBid] = useState<Bid | null>(null);
+  const [currentPlayerIndex, setCurrentPlayerIndex] = useState<number>(0);
+  const [isEndGame, setIsEndGame] = useState<boolean>(false);
+  const [lastAction, setLastAction] = useState<string>('Game started');
+  const [gameLog, setGameLog] = useState<GameLogEntry[]>([createLogEntry('Game started')]);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  const [isDisconnected, setIsDisconnected] = useState<boolean>(false);
 
-  /**
-   * Adds a message to the game log
-   */
-  const addToGameLog = useCallback((message: string, unique: boolean = false) => {
-    setGameLog(prevLog => addLogEntry(prevLog, message, unique));
-  }, []);
-
-  /**
-   * Resets the game state and returns to main menu
-   */
-  const resetToMainMenu = useCallback(() => {
-    cleanup(); // Use the new cleanup function from socket.tsx
-    setGameMode('start');
-    setGameStatus('waiting');
-    setPlayers([]);
-    setCurrentPlayerIndex(0);
-    setCurrentBid(null);
-    setLastAction('');
-    setIsEndGame(false);
-    setWinner(null);
-    setGameLog([]);
-    setRoomCode(null);
-    setPlayerId(null);
+  // Reset game state
+  const resetGame = useCallback(() => {
+    if (gameMode === 'multiplayer') {
+      cleanup();
+    }
     setPlayerName('');
-    setConnectionError(null);
+    setRoomCode('');
+    setPlayerId('');
+    setPlayers([]);
+    setGameStatus('waiting');
+    setGameMode('start');
+    setCurrentBid(null);
+    setCurrentPlayerIndex(0);
+    setIsEndGame(false);
+    setLastAction('Game started');
+    setGameLog([createLogEntry('Game started')]);
+    setIsDisconnected(false);
+    localStorage.removeItem('liarsDiceSession');
+  }, [gameMode]);
+
+  // Handle window close/refresh
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (gameMode === 'multiplayer') {
+        cleanup();
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (gameMode === 'multiplayer') {
+        cleanup();
+      }
+    };
+  }, [gameMode]);
+
+  // Try to restore session on mount
+  useEffect(() => {
+    const storedSession = localStorage.getItem('liarsDiceSession');
+    if (storedSession) {
+      try {
+        const { roomCode: savedRoomCode, playerName: savedName } = JSON.parse(storedSession);
+        if (savedRoomCode && savedName) {
+          setIsReconnecting(true);
+          socketHandler.reconnectToRoom(savedRoomCode, savedName)
+            .then((response) => {
+              if (response.success && response.players) {
+                setRoomCode(savedRoomCode);
+                setPlayerName(savedName);
+                setPlayers(response.players);
+                setGameMode('multiplayer');
+                setGameStatus(response.gameState || 'waiting');
+                if (response.currentPlayerIndex !== undefined) {
+                  setCurrentPlayerIndex(response.currentPlayerIndex);
+                }
+                if (response.currentBid) {
+                  setCurrentBid(response.currentBid);
+                }
+                // Update playerId with the current player's socket ID
+                const currentPlayer = response.players.find(p => p.name === savedName);
+                if (currentPlayer) {
+                  setPlayerId(currentPlayer.id);
+                }
+                setGameLog(prev => [createLogEntry(`Reconnected to game`), ...prev]);
+                setIsDisconnected(false);
+              } else {
+                throw new Error('Failed to restore session');
+              }
+            })
+            .catch((error) => {
+              console.error('Reconnection failed:', error);
+              localStorage.removeItem('liarsDiceSession');
+              resetGame();
+            })
+            .finally(() => {
+              setIsReconnecting(false);
+            });
+        }
+      } catch (error) {
+        console.error('Failed to parse stored session:', error);
+        localStorage.removeItem('liarsDiceSession');
+        resetGame();
+      }
+    }
+  }, [resetGame]);
+
+  // Check for end game scenario whenever players change
+  useEffect(() => {
+    if (gameStatus === 'playing') {
+      setIsEndGame(isEndGameScenario(players));
+    }
+  }, [players, gameStatus]);
+
+  // Handle computer turns in single player mode
+  useEffect(() => {
+    if (gameMode === 'singlePlayer' && 
+        gameStatus === 'playing' && 
+        !players[currentPlayerIndex]?.isHuman) {
+      const computerTurnTimeout = setTimeout(() => {
+        const currentPlayer = players[currentPlayerIndex];
+        const move = generateComputerMove(currentPlayer, players, currentBid, isEndGame);
+
+        if (move.shouldChallenge) {
+          handleChallenge();
+        } else if (move.bid) {
+          handlePlaceBid(move.bid.quantity, move.bid.value);
+        }
+      }, 1000);
+
+      return () => clearTimeout(computerTurnTimeout);
+    }
+  }, [currentPlayerIndex, gameMode, gameStatus, players, currentBid, isEndGame]);
+
+  // Start new round
+  const startNewRound = useCallback(() => {
+    setCurrentBid(null);
+    setPlayers(prev => prev.map(p => ({
+      ...p,
+      dice: rollDice(p.diceCount)
+    })));
   }, []);
 
-  /**
-   * Initializes the socket connection and handlers
-   */
+  // Set up socket event callbacks
   useEffect(() => {
-    if (gameMode !== 'multiplayer') return;
+    if (gameMode === 'multiplayer') {
+      socketHandler.updateCallbacks({
+        onConnect: () => {
+          console.log('Socket connected');
+          setIsDisconnected(false);
+        },
 
-    socketHandler.updateCallbacks({
-      onConnect: () => {
-        setConnectionError(null);
-      },
-      onDisconnect: (reason) => {
-        console.log('Disconnected:', reason);
-        if (reason === 'io server disconnect') {
-          socketHandler.reconnect();
+        onDisconnect: (reason) => {
+          console.log('Socket disconnected:', reason);
+          setIsDisconnected(true);
+          if (reason === 'io server disconnect') {
+            resetGame();
+          }
+        },
+
+        onPlayerJoined: (player) => {
+          setPlayers(prev => [...prev, player]);
+          setGameLog(prev => [createLogEntry(`${player.name} joined the game`), ...prev]);
+        },
+
+        onPlayerLeft: (data) => {
+          setPlayers(prev => prev.map(p => 
+            p.id === data.playerId ? { ...p, connected: false } : p
+          ));
+          const player = players.find(p => p.id === data.playerId);
+          if (player) {
+            setGameLog(prev => [createLogEntry(`${player.name} left the game`), ...prev]);
+          }
+        },
+
+        onPlayerReconnected: (data) => {
+          setPlayers(prev => prev.map((p, i) => 
+            i === data.playerIndex ? { ...p, connected: true } : p
+          ));
+          setGameLog(prev => [createLogEntry(`${data.playerName} reconnected`), ...prev]);
+        },
+
+        onPlayerDisconnected: (data) => {
+          setPlayers(prev => prev.map((p, i) => 
+            i === data.playerIndex ? { ...p, connected: false } : p
+          ));
+          setGameLog(prev => [createLogEntry(`${data.playerName} disconnected`), ...prev]);
+        },
+
+        onGameStarted: (gameState) => {
+          setPlayers(gameState.players);
+          setCurrentPlayerIndex(gameState.currentPlayerIndex);
+          setGameStatus('playing');
+          // Update playerId with the current player's socket ID
+          const currentPlayer = gameState.players.find(p => p.name === playerName);
+          if (currentPlayer) {
+            setPlayerId(currentPlayer.id);
+          }
+          setGameLog(prev => [createLogEntry('Game started'), ...prev]);
+        },
+
+        onBidPlaced: (data) => {
+          setCurrentBid(data.bid);
+          setCurrentPlayerIndex(data.nextPlayerIndex);
+          const actionMessage = `${data.playerName} bid ${data.bid.quantity}x${data.bid.value}`;
+          setLastAction(actionMessage);
+          setGameLog(prev => [createLogEntry(actionMessage), ...prev]);
+        },
+
+        onChallengeResult: (result) => {
+          setPlayers(result.players);
+          setCurrentBid(null);
+          let actionMessage;
+          if (result.outcome === 'succeeded') {
+            // Challenge succeeded - bidder loses
+            actionMessage = `${result.challengerName} challenged ${result.bidderName}'s bid of ${result.bid.quantity}x${result.bid.value} and won! There were only ${result.actualCount} ${result.bid.value}'s`;
+          } else {
+            // Challenge failed - challenger loses
+            actionMessage = `${result.challengerName} challenged ${result.bidderName}'s bid of ${result.bid.quantity}x${result.bid.value} and lost! There were ${result.actualCount} ${result.bid.value}'s`;
+          }
+          setLastAction(actionMessage);
+          setGameLog(prev => [createLogEntry(actionMessage), ...prev]);
+        },
+
+        onNewRound: (data) => {
+          console.log('New round started, current player:', data.currentPlayerIndex);
+          setPlayers(data.players);
+          setCurrentPlayerIndex(data.currentPlayerIndex);
+          setCurrentBid(data.currentBid);
+        },
+
+        onGameOver: (data) => {
+          setGameStatus('gameOver');
+          setGameLog(prev => [createLogEntry(`Game Over! ${data.winner.name} wins!`), ...prev]);
+          localStorage.removeItem('liarsDiceSession');
+        },
+
+        onError: (error) => {
+          console.error('Socket error:', error);
+          alert(error);
         }
-      },
-      onError: (error) => {
-        setConnectionError(error);
-        if (error.includes('not found') || error.includes('invalid')) {
-          resetToMainMenu();
-        }
-      },
-      onGameStarted: (gameData) => {
-        setGameStatus('playing');
-        setPlayers(gameData.players);
-        setCurrentPlayerIndex(gameData.currentPlayerIndex);
-        addToGameLog('The game has started!');
-      },
-      onPlayerJoined: (player) => {
-        setPlayers(prev => [...prev, player]);
-        addToGameLog(`${player.name} joined the game.`);
-      },
-      onBidPlaced: ({ bid, nextPlayerIndex, playerName }) => {
-        setCurrentBid(bid);
-        setCurrentPlayerIndex(nextPlayerIndex);
-        addToGameLog(`${playerName} bid ${bid.quantity} ${bid.value}'s`);
-        
-        // Find next connected player if current is disconnected
-        setPlayers(currentPlayers => {
-          let actualNextIndex = nextPlayerIndex;
-          while (!currentPlayers[actualNextIndex].connected) {
-            actualNextIndex = (actualNextIndex + 1) % currentPlayers.length;
-          }
-          if (actualNextIndex !== nextPlayerIndex) {
-            setCurrentPlayerIndex(actualNextIndex);
-          }
-          setLastAction(`${currentPlayers[actualNextIndex].name}'s turn`);
-          return currentPlayers;
-        });
-      },
-      onChallengeResult: (result) => {
-        setPlayers(result.players);
-        addToGameLog(
-          `Challenge ${result.outcome}! There were ${result.actualCount} ${result.bid.value}'s. ${result.loserName} lost a die.`,
-          true
-        );
-      },
-      onNewRound: ({ players, currentPlayerIndex, currentBid }) => {
-        setPlayers(players);
-        setCurrentPlayerIndex(currentPlayerIndex);
-        setCurrentBid(currentBid); // This will be null from server
-        setLastAction(`New round started. ${players[currentPlayerIndex].name}'s turn`);
-        addToGameLog('New round started.');
-      },
-      onGameOver: ({ winner, reason }) => {
-        setGameStatus('gameOver');
-        setWinner(winner);
-        cleanup(); // Use the new cleanup function
-        addToGameLog(`Game Over! ${winner.name} wins! ${reason}`);
-      },
-      onGameReset: (gameData) => {
-        setPlayers(gameData.players);
-        setCurrentPlayerIndex(gameData.currentPlayerIndex);
-        setGameStatus(gameData.gameStatus);
-        setCurrentBid(null);
-        setLastAction('Game reset. New game started.');
-        addToGameLog('Game has been reset. All players now have 5 dice.');
-        setWinner(null);
-        setIsEndGame(false);
-      },
-      onPlayerDisconnected: ({ playerName, playerIndex }) => {
-        setPlayers(currentPlayers => {
-          const updatedPlayers = [...currentPlayers];
-          updatedPlayers[playerIndex].connected = false;
-          return updatedPlayers;
-        });
-        addToGameLog(`${playerName} disconnected.`);
-        
-        // If it was the disconnected player's turn, move to next player
-        setCurrentPlayerIndex(current => {
-          if (current === playerIndex) {
-            return (current + 1) % players.length;
-          }
-          return current;
-        });
-      },
-      onPlayerReconnected: ({ playerName, playerIndex }) => {
-        setPlayers(currentPlayers => {
-          const updatedPlayers = [...currentPlayers];
-          updatedPlayers[playerIndex].connected = true;
-          return updatedPlayers;
-        });
-        addToGameLog(`${playerName} reconnected.`);
-      }
-    });
+      });
 
-    return () => {
-      socketHandler.updateCallbacks({});
-    };
-  }, [addToGameLog, players, gameMode, resetToMainMenu]);
-
-  /**
-   * Handles computer player turns in single player mode
-   */
-  useEffect(() => {
-    if (gameMode === 'singlePlayer' && gameStatus === 'playing') {
-      const currentPlayer = players[currentPlayerIndex];
-      if (currentPlayer && !currentPlayer.isHuman) {
-        const timer = setTimeout(() => {
-          const move = generateComputerMove(currentPlayer, players, currentBid, isEndGame);
-          
-          if (move.shouldChallenge) {
-            handleChallenge();
-          } else if (move.bid) {
-            handleBid(move.bid.quantity, move.bid.value);
-          }
-        }, 1000);
-        return () => clearTimeout(timer);
-      }
+      return () => {
+        socketHandler.updateCallbacks({});
+      };
     }
-  }, [gameMode, gameStatus, currentPlayerIndex, players, currentBid, isEndGame]);
-
-  /**
-   * Monitors players state for end-game scenario
-   */
-  useEffect(() => {
-    if (isEndGameScenario(players)) {
-      setIsEndGame(true);
-      addToGameLog('End game scenario: Only two players with one die each remain!');
-    }
-  }, [players, addToGameLog]);
-
-  /**
-   * Starts a new round of the game
-   */
-  const startNewRound = useCallback((startingPlayerIndex?: number) => {
-    setPlayers(prevPlayers => 
-      prevPlayers.map(player => ({
-        ...player,
-        dice: rollDice(player.diceCount)
-      }))
-    );
-
-    setCurrentBid(null);
-    setGameStatus('playing');
-    setCurrentPlayerIndex(startingPlayerIndex ?? 0);
-    setLastAction('New round started');
-    addToGameLog('New round started.');
-    setWinner(null);
-  }, [addToGameLog]);
-
-  /**
-   * Handles placing a bid
-   */
-  const handleBid = async (quantity: number, value: number) => {
-    const newBid = { quantity: isEndGame ? 1 : quantity, value };
-    
-    if (!isValidBid(newBid, currentBid, isEndGame)) {
-      alert('Invalid bid. Please check the rules and try again.');
-      return;
-    }
-
-    if (gameMode === 'multiplayer' && roomCode) {
-      const response = await socketHandler.placeBid(roomCode, newBid);
-      if (!response.success) {
-        alert('Failed to place bid. Please try again.');
-      }
-    } else {
-      const currentPlayer = players[currentPlayerIndex];
-      setCurrentBid(newBid);
-      addToGameLog(`${currentPlayer.name} bid ${newBid.quantity} ${newBid.value}'s`);
-      const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
-      setCurrentPlayerIndex(nextPlayerIndex);
-      setLastAction(`${players[nextPlayerIndex].name}'s turn`);
-    }
-  };
-
-  /**
-   * Handles challenging a bid
-   */
-  const handleChallenge = async () => {
-    if (gameMode === 'multiplayer' && roomCode) {
-      const response = await socketHandler.challenge(roomCode);
-      if (!response.success) {
-        alert('Failed to challenge. Please try again.');
-      }
-    } else {
-      const outcome = resolveChallengeOutcome(
-        players,
-        currentPlayerIndex,
-        currentBid!,
-        isEndGame
-      );
-
-      const updatedPlayers = [...players];
-      const loserIndex = outcome.loserIndex;
-      updatedPlayers[loserIndex].diceCount--;
-      updatedPlayers[loserIndex].dice = updatedPlayers[loserIndex].dice.slice(0, updatedPlayers[loserIndex].diceCount);
-
-      if (isEndGame) {
-        addToGameLog(`Challenge ${outcome.outcome}! The total value was ${outcome.actualCount}. ${outcome.loserName} lost the game.`);
-      } else {
-        addToGameLog(`Challenge ${outcome.outcome}! There were ${outcome.actualCount} ${currentBid!.value}'s. ${outcome.loserName} lost a die.`);
-      }
-
-      if (updatedPlayers[loserIndex].diceCount === 0) {
-        updatedPlayers.splice(loserIndex, 1);
-      }
-
-      setPlayers(updatedPlayers);
-      
-      if (updatedPlayers.length <= 1) {
-        setGameStatus('gameOver');
-        setWinner(updatedPlayers[0]);
-      } else {
-        // Ensure state is synchronized by using a callback
-        setPlayers(currentPlayers => {
-          startNewRound(loserIndex);
-          return currentPlayers;
-        });
-      }
-    }
-  };
-
-  /**
-   * Resets the game to initial state
-   */
-  const handleReset = useCallback(() => {
-    const initialPlayers = players.map(player => ({
-      ...player,
-      diceCount: GAME_CONSTANTS.TOTAL_DICE,
-      dice: rollDice(GAME_CONSTANTS.TOTAL_DICE)
-    }));
-
-    if (gameMode === 'multiplayer' && roomCode) {
-      socketHandler.resetGame(roomCode, initialPlayers);
-    } else {
-      setPlayers(initialPlayers);
-      setCurrentBid(null);
-      setGameStatus('playing');
-      setCurrentPlayerIndex(0);
-      setLastAction('Game reset. New game started.');
-      addToGameLog('Game has been reset. All players now have 5 dice.');
-      setWinner(null);
-      setIsEndGame(false);
-    }
-  }, [players, gameMode, roomCode, addToGameLog]);
-
-  /**
-   * Handles starting a single player game
-   */
-  const handleSelectSinglePlayer = (playerCount: number) => {
-    const newPlayers: Player[] = [
-      { 
-        id: '1', 
-        name: 'You', 
-        dice: rollDice(GAME_CONSTANTS.TOTAL_DICE), 
-        diceCount: GAME_CONSTANTS.TOTAL_DICE, 
-        isHuman: true, 
-        connected: true 
-      },
-      ...Array(playerCount - 1).fill(null).map((_, i) => ({
-        id: (i + 2).toString(),
-        name: `Computer ${i + 1}`,
-        dice: rollDice(GAME_CONSTANTS.TOTAL_DICE),
-        diceCount: GAME_CONSTANTS.TOTAL_DICE,
-        isHuman: false,
-        connected: true
-      }))
-    ];
-
-    setGameMode('singlePlayer');
-    setPlayers(newPlayers);
-    setGameStatus('playing');
-    startNewRound();
-  };
-
-  /**
-   * Handles starting a multiplayer game
-   */
-  const handleSelectMultiplayer = () => {
-    setJoinMode('create');
-    setGameMode('joinGame');
-  };
+  }, [gameMode, players, startNewRound, resetGame, playerName]);
 
   /**
    * Handles creating a new game
    */
   const handleCreateGame = async (name: string) => {
-    setPlayerName(name);
-    
-    const response = await socketHandler.createRoom(name);
-    if (response.success && response.roomCode && response.playerId && response.players) {
-      setRoomCode(response.roomCode);
-      setPlayerId(response.playerId);
-      setPlayers(response.players);
-      setGameStatus('waiting');
-      setGameMode('multiplayer');
-    } else {
-      alert("Failed to create room. Please try again.");
+    try {
+      setPlayerName(name);
+      const response = await createRoom(name) as CreateRoomResponse;
+      
+      if (response.success && response.roomCode && response.playerId && response.players) {
+        setRoomCode(response.roomCode);
+        setPlayerId(response.playerId);
+        setPlayers(response.players);
+        setGameStatus('waiting');
+        setGameMode('multiplayer');
+        localStorage.setItem('liarsDiceSession', JSON.stringify({ 
+          roomCode: response.roomCode, 
+          playerName: name,
+          timestamp: Date.now()
+        }));
+      } else {
+        throw new Error(response.error || response.message || "Failed to create room");
+      }
+    } catch (error: any) {
+      console.error('Create game failed:', error);
+      alert(error.message || "Failed to create room. Please try again.");
+      resetGame();
     }
   };
 
@@ -376,116 +302,271 @@ const LiarsDice: React.FC = () => {
    * Handles joining an existing game
    */
   const handleJoinGame = async (code: string, name: string) => {
-    const response = await socketHandler.joinRoom(code, name);
-    if (response.success && response.playerId && response.players) {
-      setRoomCode(code);
-      setPlayerId(response.playerId);
-      setPlayers(response.players);
+    try {
       setPlayerName(name);
-      setGameMode('multiplayer');
-      addToGameLog(`You joined the game.`);
-    } else {
-      alert(response.message || 'Failed to join game');
+      const response = await joinRoom(code, name) as CreateRoomResponse;
+      
+      if (response.success && response.playerId && response.players) {
+        setRoomCode(code);
+        setPlayerId(response.playerId);
+        setPlayers(response.players);
+        setGameStatus('waiting');
+        setGameMode('multiplayer');
+        localStorage.setItem('liarsDiceSession', JSON.stringify({ 
+          roomCode: code, 
+          playerName: name,
+          timestamp: Date.now()
+        }));
+      } else {
+        throw new Error(response.error || response.message || "Failed to join room");
+      }
+    } catch (error: any) {
+      console.error('Join game failed:', error);
+      alert(error.message || "Failed to join room. Please try again.");
+      resetGame();
     }
+  };
+
+  /**
+   * Handles starting a single player game
+   */
+  const handleStartSinglePlayer = (playerCount: number) => {
+    const computerPlayers = Array.from({ length: playerCount - 1 }, (_, i) => ({
+      id: `computer-${i}`,
+      name: `Computer ${i + 1}`,
+      diceCount: 5,
+      dice: rollDice(5),
+      isHuman: false,
+      connected: true
+    }));
+
+    const humanPlayer = {
+      id: 'human',
+      name: 'You',
+      diceCount: 5,
+      dice: rollDice(5),
+      isHuman: true,
+      connected: true
+    };
+
+    setPlayers([humanPlayer, ...computerPlayers]);
+    setGameStatus('playing');
+    setGameMode('singlePlayer');
+    setCurrentPlayerIndex(0);
   };
 
   /**
    * Handles starting a multiplayer game
    */
-  const handleStartGame = async () => {
-    if (roomCode) {
-      const response = await socketHandler.startGame(roomCode);
+  const handleStartMultiplayer = async () => {
+    try {
+      const response = await startGame(roomCode);
       if (!response.success) {
-        setConnectionError(response.message || 'Failed to start game');
+        throw new Error(response.message || "Failed to start game");
+      }
+      setGameStatus('playing');
+    } catch (error: any) {
+      console.error('Start game failed:', error);
+      alert(error.message || "Failed to start game. Please try again.");
+    }
+  };
+
+  /**
+   * Handles placing a bid
+   */
+  const handlePlaceBid = (quantity: number, value: number) => {
+    const bid = { quantity, value };
+    
+    if (!isValidBid(bid, currentBid, isEndGame)) {
+      alert('Invalid bid!');
+      return;
+    }
+
+    setCurrentBid(bid);
+    
+    if (gameMode === 'multiplayer') {
+      placeBid(roomCode, bid).catch(error => {
+        console.error('Place bid failed:', error);
+        alert(error.message || "Failed to place bid. Please try again.");
+      });
+    } else {
+      setCurrentPlayerIndex((prevIndex) => (prevIndex + 1) % players.length);
+      const actionMessage = `${players[currentPlayerIndex].name} bid ${quantity}x${value}`;
+      setLastAction(actionMessage);
+      setGameLog(prev => [createLogEntry(actionMessage), ...prev]);
+    }
+  };
+
+  /**
+   * Handles challenging a bid
+   */
+  const handleChallenge = () => {
+    if (!currentBid) return;
+
+    if (gameMode === 'multiplayer') {
+      challenge(roomCode).catch(error => {
+        console.error('Challenge failed:', error);
+        alert(error.message || "Failed to challenge. Please try again.");
+      });
+    } else {
+      const outcome = resolveChallengeOutcome(
+        players,
+        currentPlayerIndex,
+        currentBid,
+        isEndGame
+      );
+      
+      setPlayers(prev => prev.map((p, i) => 
+        i === outcome.loserIndex
+          ? { ...p, diceCount: p.diceCount - 1, dice: p.dice.slice(1) }
+          : p
+      ));
+
+      const actionMessage = `${outcome.challengerName} challenged ${outcome.bidderName}'s bid of ${currentBid.quantity}x${currentBid.value}! ` +
+        `There were ${outcome.actualCount} ${currentBid.value}'s. ${outcome.loserName} loses a die!`;
+      setLastAction(actionMessage);
+      setGameLog(prev => [createLogEntry(actionMessage), ...prev]);
+      
+      const remainingPlayers = players.filter(p => 
+        p.diceCount > 1 || (p.diceCount === 1 && players[outcome.loserIndex].id !== p.id)
+      );
+      
+      if (remainingPlayers.length === 1) {
+        setGameStatus('gameOver');
+        const winner = remainingPlayers[0];
+        setGameLog(prev => [createLogEntry(`Game Over! ${winner.name} wins!`), ...prev]);
+      } else {
+        setCurrentBid(null);
+        setCurrentPlayerIndex((outcome.loserIndex + 1) % players.length);
+        startNewRound();
       }
     }
   };
 
-  if (isReconnecting) {
-    return <div className="p-4 text-center">Reconnecting to game...</div>;
-  }
-
   /**
    * Renders the appropriate component based on game state
    */
-  if (gameMode === 'start') {
-    return (
-      <StartScreen
-        onSelectSinglePlayer={handleSelectSinglePlayer}
-        onSelectMultiplayer={handleSelectMultiplayer}
-        onSelectJoinGame={() => {
-          setJoinMode('join');
-          setGameMode('joinGame');
-        }}
-      />
-    );
-  }
-
-  if (gameMode === 'joinGame') {
-    return (
-      <JoinGame
-        mode={joinMode}
-        onJoin={handleJoinGame}
-        onCreate={handleCreateGame}
-        onCancel={() => setGameMode('start')}
-      />
-    );
-  }
-
-  if (gameMode === 'multiplayer' && gameStatus === 'waiting' && roomCode) {
-    return (
-      <WaitingRoom
-        roomCode={roomCode}
-        players={players.map(p => p.name)}
-        onStartGame={handleStartGame}
-        onCancel={() => {
-          cleanup(); // Use the new cleanup function
-          setGameMode('start');
-        }}
-      />
-    );
-  }
-
-  return (
-    <div className="p-4 max-w-4xl mx-auto">
-      <h1 className="game-title">Liar's Dice</h1>
-      
-      {connectionError && gameMode === 'multiplayer' && (
-        <div className="error-message bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
-          <strong className="font-bold">Error:</strong>
-          <span className="block sm:inline"> {connectionError}</span>
+  const renderGameState = () => {
+    if (isReconnecting) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-4">Reconnecting to game...</h2>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          </div>
         </div>
-      )}
+      );
+    }
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-        <div>
+    if (isDisconnected && gameMode === 'multiplayer') {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-4">Disconnected from server</h2>
+            <p className="text-muted-foreground mb-4">Attempting to reconnect...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+            <button
+              onClick={resetGame}
+              className="mt-8 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+            >
+              Return to Main Menu
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (gameMode === 'start') {
+      return (
+        <StartScreen
+          onSelectSinglePlayer={handleStartSinglePlayer}
+          onSelectMultiplayer={() => setGameMode('create')}
+          onSelectJoinGame={() => setGameMode('join')}
+        />
+      );
+    }
+
+    if (gameMode === 'create' || gameMode === 'join') {
+      return (
+        <JoinGame
+          mode={gameMode}
+          onJoin={handleJoinGame}
+          onCreate={handleCreateGame}
+          onCancel={() => {
+            resetGame();
+            setGameMode('start');
+          }}
+        />
+      );
+    }
+
+    if (gameStatus === 'waiting' && gameMode === 'multiplayer') {
+      return (
+        <WaitingRoom
+          roomCode={roomCode}
+          players={players.map(p => p.name)}
+          onStartGame={handleStartMultiplayer}
+          onCancel={resetGame}
+        />
+      );
+    }
+
+    if (gameStatus === 'playing' && (gameMode === 'singlePlayer' || gameMode === 'multiplayer')) {
+      const playMode: GamePlayMode = gameMode === 'singlePlayer' ? 'singlePlayer' : 'multiplayer';
+      return (
+        <div className="container mx-auto p-4 space-y-6">
           <GameBoard
             players={players}
             currentBid={currentBid}
             currentPlayerIndex={currentPlayerIndex}
             playerId={playerId}
             isEndGame={isEndGame}
-            gameMode={gameMode === 'singlePlayer' ? 'singlePlayer' : 'multiplayer'}
+            gameMode={playMode}
             lastAction={lastAction}
-            onPlaceBid={handleBid}
+            onPlaceBid={handlePlaceBid}
             onChallenge={handleChallenge}
           />
+          <GameLog entries={gameLog} />
+          {gameMode === 'multiplayer' && (
+            <div className="fixed bottom-4 right-4">
+              <button
+                onClick={resetGame}
+                className="px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90"
+              >
+                Leave Game
+              </button>
+            </div>
+          )}
         </div>
-        <GameLog entries={gameLog} />
-      </div>
+      );
+    }
 
-      <GameControls
-        gameStatus={gameStatus}
-        winner={winner}
-        onReset={handleReset}
-        onCancel={() => {
-          cleanup(); // Use the new cleanup function
-          setGameMode('start');
-        }}
-        isHost={playerId === players[0]?.id}
-        onStartGame={handleStartGame}
-        roomCode={roomCode}
-      />
+    if (gameStatus === 'gameOver') {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-4xl font-bold mb-8 bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent">
+              Game Over!
+            </h2>
+            <div className="space-y-4">
+              <button
+                onClick={resetGame}
+                className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+              >
+                Return to Main Menu
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {renderGameState()}
     </div>
   );
 };
