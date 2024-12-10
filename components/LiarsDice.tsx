@@ -33,6 +33,7 @@ const LiarsDice: React.FC = () => {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
 
   /**
    * Adds a message to the game log
@@ -42,14 +43,49 @@ const LiarsDice: React.FC = () => {
   }, []);
 
   /**
+   * Attempts to reconnect to a game room
+   */
+  const attemptReconnection = useCallback(async () => {
+    const storedInfo = localStorage.getItem('roomInfo');
+    if (storedInfo) {
+      const { roomCode: storedRoomCode, playerName: storedPlayerName } = JSON.parse(storedInfo);
+      if (storedRoomCode && storedPlayerName) {
+        setIsReconnecting(true);
+        const response = await socketHandler.reconnectToRoom(storedRoomCode, storedPlayerName);
+        if (response.success && response.players) {
+          setRoomCode(storedRoomCode);
+          setPlayerName(storedPlayerName);
+          setPlayers(response.players);
+          setGameMode('multiplayer');
+          addToGameLog('Reconnected to game.');
+        } else {
+          localStorage.removeItem('roomInfo');
+          setGameMode('start');
+        }
+        setIsReconnecting(false);
+      }
+    }
+  }, [addToGameLog]);
+
+  /**
    * Initializes the socket connection and handlers
    */
   useEffect(() => {
     if (gameMode !== 'multiplayer') return;
 
     socketHandler.updateCallbacks({
-      onConnect: () => setConnectionError(null),
-      onDisconnect: (reason) => console.log('Disconnected:', reason),
+      onConnect: () => {
+        setConnectionError(null);
+        if (!isReconnecting) {
+          attemptReconnection();
+        }
+      },
+      onDisconnect: (reason) => {
+        console.log('Disconnected:', reason);
+        if (reason === 'io server disconnect') {
+          socketHandler.reconnect();
+        }
+      },
       onError: (error) => setConnectionError(error),
       onGameStarted: (gameData) => {
         setGameStatus('playing');
@@ -65,7 +101,19 @@ const LiarsDice: React.FC = () => {
         setCurrentBid(bid);
         setCurrentPlayerIndex(nextPlayerIndex);
         addToGameLog(`${playerName} bid ${bid.quantity} ${bid.value}'s`);
-        setLastAction(`${players[nextPlayerIndex].name}'s turn`);
+        
+        // Find next connected player if current is disconnected
+        setPlayers(currentPlayers => {
+          let actualNextIndex = nextPlayerIndex;
+          while (!currentPlayers[actualNextIndex].connected) {
+            actualNextIndex = (actualNextIndex + 1) % currentPlayers.length;
+          }
+          if (actualNextIndex !== nextPlayerIndex) {
+            setCurrentPlayerIndex(actualNextIndex);
+          }
+          setLastAction(`${currentPlayers[actualNextIndex].name}'s turn`);
+          return currentPlayers;
+        });
       },
       onChallengeResult: (result) => {
         setPlayers(result.players);
@@ -84,6 +132,7 @@ const LiarsDice: React.FC = () => {
       onGameOver: ({ winner, reason }) => {
         setGameStatus('gameOver');
         setWinner(winner);
+        localStorage.removeItem('roomInfo');
       },
       onGameReset: (gameData) => {
         setPlayers(gameData.players);
@@ -94,13 +143,34 @@ const LiarsDice: React.FC = () => {
         addToGameLog('Game has been reset. All players now have 5 dice.');
         setWinner(null);
         setIsEndGame(false);
+      },
+      onPlayerDisconnected: ({ playerName, playerIndex }) => {
+        setPlayers(currentPlayers => {
+          const updatedPlayers = [...currentPlayers];
+          updatedPlayers[playerIndex].connected = false;
+          return updatedPlayers;
+        });
+        addToGameLog(`${playerName} disconnected.`);
+        
+        // If it was the disconnected player's turn, move to next player
+        setCurrentPlayerIndex(current => {
+          if (current === playerIndex) {
+            return (current + 1) % players.length;
+          }
+          return current;
+        });
       }
     });
 
     return () => {
       socketHandler.updateCallbacks({});
     };
-  }, [addToGameLog, players, gameMode]);
+  }, [addToGameLog, players, gameMode, isReconnecting, attemptReconnection]);
+
+  // Try to reconnect on initial load
+  useEffect(() => {
+    attemptReconnection();
+  }, [attemptReconnection]);
 
   /**
    * Handles computer player turns in single player mode
@@ -316,6 +386,7 @@ const LiarsDice: React.FC = () => {
       setPlayers(response.players);
       setPlayerName(name);
       setGameMode('multiplayer');
+      localStorage.setItem('roomInfo', JSON.stringify({ roomCode: code, playerName: name }));
       addToGameLog(`You joined the game.`);
     } else {
       alert(response.message || 'Failed to join game');
@@ -333,6 +404,10 @@ const LiarsDice: React.FC = () => {
       }
     }
   };
+
+  if (isReconnecting) {
+    return <div className="p-4 text-center">Reconnecting to game...</div>;
+  }
 
   /**
    * Renders the appropriate component based on game state
@@ -367,7 +442,10 @@ const LiarsDice: React.FC = () => {
         roomCode={roomCode}
         players={players.map(p => p.name)}
         onStartGame={handleStartGame}
-        onCancel={() => setGameMode('start')}
+        onCancel={() => {
+          localStorage.removeItem('roomInfo');
+          setGameMode('start');
+        }}
       />
     );
   }
@@ -404,7 +482,10 @@ const LiarsDice: React.FC = () => {
         gameStatus={gameStatus}
         winner={winner}
         onReset={handleReset}
-        onCancel={() => setGameMode('start')}
+        onCancel={() => {
+          localStorage.removeItem('roomInfo');
+          setGameMode('start');
+        }}
         isHost={playerId === players[0]?.id}
         onStartGame={handleStartGame}
         roomCode={roomCode}

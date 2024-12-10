@@ -55,6 +55,15 @@ export class SocketHandler {
   }
 
   /**
+   * Reconnects the socket if disconnected
+   */
+  reconnect(): void {
+    if (!this.socket.connected) {
+      this.socket.connect();
+    }
+  }
+
+  /**
    * Sets up all socket event listeners
    */
   private initializeEventListeners(): void {

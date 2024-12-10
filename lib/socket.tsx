@@ -4,17 +4,24 @@ import { SocketHandler } from '../utils/socketHandler';
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3002';
 
-// Determine if we should use secure WebSocket based on the protocol
-const isSecure = SOCKET_URL.startsWith('https://');
-const socketUrl = isSecure ? SOCKET_URL : SOCKET_URL.replace('http://', 'ws://');
-
-const socket = io(socketUrl, {
+const socket = io(SOCKET_URL, {
   transports: ['websocket'],
   reconnection: true,
   reconnectionAttempts: 10,
   reconnectionDelay: 1000,
   reconnectionDelayMax: 5000,
-  secure: isSecure,
+  secure: SOCKET_URL.startsWith('https://'),
+  forceNew: true,
+  path: '/socket.io/',
+  autoConnect: true
+});
+
+socket.on('connect_error', (error) => {
+  console.log('Connection error:', error);
+});
+
+socket.on('connect', () => {
+  console.log('Connected to server');
 });
 
 const socketHandler = new SocketHandler(socket, {});
