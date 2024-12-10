@@ -5,16 +5,35 @@ import { SocketHandler } from '../utils/socketHandler';
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'https://lie-die.com:3002';
 console.log('Connecting to socket URL:', SOCKET_URL); // Debug log
 
+// Get stored session data if it exists
+const getStoredSession = () => {
+  if (typeof window === 'undefined') return null;
+  const stored = localStorage.getItem('liarsDiceSession');
+  return stored ? JSON.parse(stored) : null;
+};
+
+// Store session data
+const storeSession = (roomCode: string, playerName: string) => {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('liarsDiceSession', JSON.stringify({ roomCode, playerName }));
+};
+
+// Clear session data
+const clearSession = () => {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('liarsDiceSession');
+};
+
 const socket = io(SOCKET_URL, {
   transports: ['websocket'],
   reconnection: true,
-  reconnectionAttempts: 5,  // Increased from 3 to 5
-  reconnectionDelay: 1000,  // Decreased to be more responsive
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000,
   reconnectionDelayMax: 5000,
-  secure: true, // Force secure connection
-  forceNew: true,
+  secure: true,
+  forceNew: false, // Changed to false to allow reconnection
   path: '/socket.io/',
-  autoConnect: true  // Changed to true for immediate connection
+  autoConnect: true
 });
 
 socket.on('connect_error', (error) => {
@@ -27,6 +46,16 @@ socket.on('connect', () => {
   console.log('Connected to server successfully');
   console.log('Socket ID:', socket.id);
   console.log('Transport:', socket.io.engine.transport.name);
+  
+  // Attempt to reconnect to room if session exists
+  const session = getStoredSession();
+  if (session) {
+    socket.emit('reconnectToRoom', session, (response: any) => {
+      if (!response.success) {
+        clearSession(); // Clear invalid session
+      }
+    });
+  }
 });
 
 const socketHandler = new SocketHandler(socket, {});
@@ -45,7 +74,11 @@ export const joinRoom = async (roomCode: string, playerName: string) => {
         });
       });
     }
-    return await socketHandler.joinRoom(roomCode, playerName);
+    const result = await socketHandler.joinRoom(roomCode, playerName);
+    if (result.success) {
+      storeSession(roomCode, playerName);
+    }
+    return result;
   } catch (error) {
     console.error('Join room error:', error);
     return { success: false, message: 'Failed to connect to game server' };
@@ -98,6 +131,12 @@ export const challenge = async (roomCode: string) => {
     console.error('Challenge error:', error);
     return { success: false, error: 'Failed to submit challenge' };
   }
+};
+
+// Add cleanup function for unmounting
+export const cleanup = () => {
+  clearSession();
+  socket.disconnect();
 };
 
 export default socketHandler;

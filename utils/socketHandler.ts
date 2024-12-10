@@ -225,6 +225,9 @@ export class SocketHandler {
   reconnectToRoom(roomCode: string, playerName: string): Promise<{
     success: boolean;
     players?: Player[];
+    gameState?: GameStatus;
+    currentPlayerIndex?: number;
+    currentBid?: Bid | null;
     error?: string;
   }> {
     return new Promise((resolve) => {

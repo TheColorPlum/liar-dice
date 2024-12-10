@@ -7,14 +7,11 @@ import GameControls from './GameControls';
 import StartScreen from './StartScreen';
 import JoinGame from './JoinGame';
 import WaitingRoom from './WaitingRoom';
-import socketHandler from '../lib/socket';
+import socketHandler, { cleanup } from '../lib/socket';
 import { generateComputerMove } from '../utils/computerAI';
 import { isValidBid, rollDice, isEndGameScenario, resolveChallengeOutcome } from '../utils/gameLogic';
 import { Player, Bid, GameStatus, GameMode, GameLogEntry, GAME_CONSTANTS } from '../types/game';
 
-/**
- * Main component for the Liar's Dice game
- */
 const LiarsDice: React.FC = () => {
   // Game state
   const [gameMode, setGameMode] = useState<GameMode>('start');
@@ -43,31 +40,24 @@ const LiarsDice: React.FC = () => {
   }, []);
 
   /**
-   * Attempts to reconnect to a game room
+   * Resets the game state and returns to main menu
    */
-  const attemptReconnection = useCallback(async () => {
-    const storedInfo = localStorage.getItem('roomInfo');
-    if (storedInfo) {
-      const { roomCode: storedRoomCode, playerName: storedPlayerName } = JSON.parse(storedInfo);
-      if (storedRoomCode && storedPlayerName) {
-        setIsReconnecting(true);
-        const response = await socketHandler.reconnectToRoom(storedRoomCode, storedPlayerName);
-        if (response.success && response.players) {
-          setRoomCode(storedRoomCode);
-          setPlayerName(storedPlayerName);
-          setPlayers(response.players);
-          setGameMode('multiplayer');
-          addToGameLog('Reconnected to game.');
-        } else {
-          localStorage.removeItem('roomInfo');
-          setGameMode('start');
-        }
-        setIsReconnecting(false);
-      }
-    } else {
-      setGameMode('start');
-    }
-  }, [addToGameLog]);
+  const resetToMainMenu = useCallback(() => {
+    cleanup(); // Use the new cleanup function from socket.tsx
+    setGameMode('start');
+    setGameStatus('waiting');
+    setPlayers([]);
+    setCurrentPlayerIndex(0);
+    setCurrentBid(null);
+    setLastAction('');
+    setIsEndGame(false);
+    setWinner(null);
+    setGameLog([]);
+    setRoomCode(null);
+    setPlayerId(null);
+    setPlayerName('');
+    setConnectionError(null);
+  }, []);
 
   /**
    * Initializes the socket connection and handlers
@@ -78,9 +68,6 @@ const LiarsDice: React.FC = () => {
     socketHandler.updateCallbacks({
       onConnect: () => {
         setConnectionError(null);
-        if (!isReconnecting && localStorage.getItem('roomInfo')) {
-          attemptReconnection();
-        }
       },
       onDisconnect: (reason) => {
         console.log('Disconnected:', reason);
@@ -88,7 +75,12 @@ const LiarsDice: React.FC = () => {
           socketHandler.reconnect();
         }
       },
-      onError: (error) => setConnectionError(error),
+      onError: (error) => {
+        setConnectionError(error);
+        if (error.includes('not found') || error.includes('invalid')) {
+          resetToMainMenu();
+        }
+      },
       onGameStarted: (gameData) => {
         setGameStatus('playing');
         setPlayers(gameData.players);
@@ -134,7 +126,8 @@ const LiarsDice: React.FC = () => {
       onGameOver: ({ winner, reason }) => {
         setGameStatus('gameOver');
         setWinner(winner);
-        localStorage.removeItem('roomInfo');
+        cleanup(); // Use the new cleanup function
+        addToGameLog(`Game Over! ${winner.name} wins! ${reason}`);
       },
       onGameReset: (gameData) => {
         setPlayers(gameData.players);
@@ -161,23 +154,21 @@ const LiarsDice: React.FC = () => {
           }
           return current;
         });
+      },
+      onPlayerReconnected: ({ playerName, playerIndex }) => {
+        setPlayers(currentPlayers => {
+          const updatedPlayers = [...currentPlayers];
+          updatedPlayers[playerIndex].connected = true;
+          return updatedPlayers;
+        });
+        addToGameLog(`${playerName} reconnected.`);
       }
     });
 
     return () => {
       socketHandler.updateCallbacks({});
     };
-  }, [addToGameLog, players, gameMode, isReconnecting, attemptReconnection]);
-
-  // Try to reconnect on initial load only if there's stored room info
-  useEffect(() => {
-    const storedInfo = localStorage.getItem('roomInfo');
-    if (storedInfo) {
-      attemptReconnection();
-    } else {
-      setGameMode('start');
-    }
-  }, [attemptReconnection]);
+  }, [addToGameLog, players, gameMode, resetToMainMenu]);
 
   /**
    * Handles computer player turns in single player mode
@@ -376,7 +367,6 @@ const LiarsDice: React.FC = () => {
       setPlayers(response.players);
       setGameStatus('waiting');
       setGameMode('multiplayer');
-      localStorage.setItem('roomInfo', JSON.stringify({ roomCode: response.roomCode, playerName: name }));
     } else {
       alert("Failed to create room. Please try again.");
     }
@@ -393,7 +383,6 @@ const LiarsDice: React.FC = () => {
       setPlayers(response.players);
       setPlayerName(name);
       setGameMode('multiplayer');
-      localStorage.setItem('roomInfo', JSON.stringify({ roomCode: code, playerName: name }));
       addToGameLog(`You joined the game.`);
     } else {
       alert(response.message || 'Failed to join game');
@@ -450,7 +439,7 @@ const LiarsDice: React.FC = () => {
         players={players.map(p => p.name)}
         onStartGame={handleStartGame}
         onCancel={() => {
-          localStorage.removeItem('roomInfo');
+          cleanup(); // Use the new cleanup function
           setGameMode('start');
         }}
       />
@@ -490,7 +479,7 @@ const LiarsDice: React.FC = () => {
         winner={winner}
         onReset={handleReset}
         onCancel={() => {
-          localStorage.removeItem('roomInfo');
+          cleanup(); // Use the new cleanup function
           setGameMode('start');
         }}
         isHost={playerId === players[0]?.id}

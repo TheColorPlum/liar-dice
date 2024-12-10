@@ -21,27 +21,33 @@ if (process.env.NODE_ENV === 'production') {
   server = createServer(app);
 }
 
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? 
+  process.env.ALLOWED_ORIGINS.split(',') : 
+  ["http://localhost:3000", "http://107.22.150.134:3000", "https://lie-die.com"];
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000", "http://107.22.150.134:3000", "https://lie-die.com"],
+    origin: ALLOWED_ORIGINS,
     methods: ["GET", "POST"],
-    credentials: true,
-    transports: ['websocket']
+    credentials: true
   },
   pingTimeout: 60000, // 1 minute
   pingInterval: 25000, // 25 seconds
-  allowEIO3: true
+  transports: ['websocket', 'polling'], // Allow polling as fallback
+  allowEIO3: true,
+  connectTimeout: 45000, // 45 seconds
+  maxHttpBufferSize: 1e6 // 1 MB
 });
 
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000", "http://107.22.150.134:3000", "https://lie-die.com"],
+  origin: ALLOWED_ORIGINS,
   credentials: true
 }));
 app.use(express.json());
 
 const TOTAL_DICE = 5;
 const DICE_SIDES = 6;
-const DISCONNECT_TIMEOUT = 30000; // 30 seconds
+const DISCONNECT_TIMEOUT = 60000; // Increased to 60 seconds
 const INACTIVE_ROOM_CLEANUP = 3600000; // 1 hour
 
 const rooms = new Map();
@@ -89,12 +95,16 @@ function checkRoomValidity(room) {
     return false;
   }
   
-  // If no players are connected and room is inactive, mark for cleanup
+  // If no players are connected, mark for cleanup but give more time for reconnection
   if (connectedPlayers === 0) {
-    room.lastActive = Date.now();
+    if (!room.lastActive) {
+      room.lastActive = Date.now();
+    }
     return false;
   }
   
+  // Reset lastActive if there are connected players
+  room.lastActive = null;
   return true;
 }
 
@@ -104,6 +114,7 @@ setInterval(() => {
   for (const [roomCode, room] of rooms.entries()) {
     if (room.lastActive && (now - room.lastActive > INACTIVE_ROOM_CLEANUP)) {
       rooms.delete(roomCode);
+      console.log(`Room ${roomCode} cleaned up due to inactivity`);
     }
   }
 }, INACTIVE_ROOM_CLEANUP);
@@ -120,9 +131,12 @@ function cleanupPlayerDisconnect(socket, room, playerIndex) {
   // Set new disconnect timer
   const timer = setTimeout(() => {
     if (!player.connected) {
-      room.players.splice(playerIndex, 1);
-      if (!checkRoomValidity(room)) {
-        rooms.delete(room.code);
+      const playerStillExists = room.players.findIndex(p => p.name === player.name) !== -1;
+      if (playerStillExists) {
+        room.players.splice(playerIndex, 1);
+        if (!checkRoomValidity(room)) {
+          rooms.delete(room.code);
+        }
       }
     }
   }, DISCONNECT_TIMEOUT);
