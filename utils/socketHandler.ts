@@ -40,6 +40,9 @@ interface SocketCallbacks {
 export class SocketHandler {
   private socket: Socket;
   private callbacks: SocketCallbacks;
+  private reconnectAttempts: number = 0;
+  private readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private isReconnecting: boolean = false;
 
   constructor(socket: Socket, callbacks: SocketCallbacks) {
     this.socket = socket;
@@ -58,9 +61,49 @@ export class SocketHandler {
    * Reconnects the socket if disconnected
    */
   reconnect(): void {
-    if (!this.socket.connected) {
-      this.socket.connect();
+    if (!this.socket.connected && !this.isReconnecting) {
+      console.log('Attempting manual reconnection');
+      this.handleReconnection();
     }
+  }
+
+  /**
+   * Handles reconnection attempts with backoff
+   */
+  private handleReconnection(): void {
+    if (this.isReconnecting || this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      return;
+    }
+
+    this.isReconnecting = true;
+    const attempt = () => {
+      if (!this.socket.connected && this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
+        this.reconnectAttempts++;
+        const backoffDelay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 5000);
+        
+        console.log(`Reconnection attempt ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS}`, {
+          backoffDelay,
+          transport: this.socket.io?.engine?.transport?.name
+        });
+        
+        setTimeout(() => {
+          if (!this.socket.connected) {
+            console.log('Attempting to reconnect...');
+            this.socket.connect();
+            
+            if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
+              attempt();
+            } else {
+              this.isReconnecting = false;
+              console.error('Max reconnection attempts reached');
+              this.callbacks.onError?.('Failed to connect after maximum attempts');
+            }
+          }
+        }, backoffDelay);
+      }
+    };
+
+    attempt();
   }
 
   /**
@@ -69,6 +112,8 @@ export class SocketHandler {
   private initializeEventListeners(): void {
     this.socket.on('connect', () => {
       console.log('Connected to server');
+      this.isReconnecting = false;
+      this.reconnectAttempts = 0;
       this.callbacks.onConnect?.();
     });
 
@@ -76,14 +121,22 @@ export class SocketHandler {
       console.log('Disconnected from server:', reason);
       this.callbacks.onDisconnect?.(reason);
       
-      if (reason === 'io server disconnect') {
-        this.socket.connect();
+      if (reason === 'io server disconnect' || 
+          reason === 'transport close' || 
+          reason === 'ping timeout') {
+        this.handleReconnection();
       }
     });
 
     this.socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
       this.callbacks.onError?.('Error connecting to game server. Please try again later.');
+      
+      // Attempt to reconnect on connection error
+      if (!this.isReconnecting) {
+        console.log('Initiating reconnection after connection error');
+        this.handleReconnection();
+      }
     });
 
     this.socket.on('gameStarted', (gameData) => {
@@ -140,6 +193,12 @@ export class SocketHandler {
       console.log('Game reset event received', gameData);
       this.callbacks.onGameReset?.(gameData);
     });
+
+    // Ensure initial connection
+    if (!this.socket.connected) {
+      console.log('Initiating initial connection');
+      this.socket.connect();
+    }
   }
 
   /**
@@ -153,6 +212,10 @@ export class SocketHandler {
     error?: string;
   }> {
     return new Promise((resolve) => {
+      if (!this.socket.connected) {
+        console.log('Socket not connected, attempting to connect before creating room');
+        this.socket.connect();
+      }
       this.socket.emit('createRoom', { playerName }, resolve);
     });
   }
@@ -167,6 +230,10 @@ export class SocketHandler {
     message?: string;
   }> {
     return new Promise((resolve) => {
+      if (!this.socket.connected) {
+        console.log('Socket not connected, attempting to connect before joining room');
+        this.socket.connect();
+      }
       this.socket.emit('joinRoom', { roomCode, playerName }, resolve);
     });
   }
@@ -179,6 +246,10 @@ export class SocketHandler {
     message?: string;
   }> {
     return new Promise((resolve) => {
+      if (!this.socket.connected) {
+        console.log('Socket not connected, attempting to connect before starting game');
+        this.socket.connect();
+      }
       this.socket.emit('startGame', { roomCode }, resolve);
     });
   }
@@ -191,6 +262,10 @@ export class SocketHandler {
     error?: string;
   }> {
     return new Promise((resolve) => {
+      if (!this.socket.connected) {
+        console.log('Socket not connected, attempting to connect before placing bid');
+        this.socket.connect();
+      }
       this.socket.emit('placeBid', { roomCode, bid }, resolve);
     });
   }
@@ -203,6 +278,10 @@ export class SocketHandler {
     error?: string;
   }> {
     return new Promise((resolve) => {
+      if (!this.socket.connected) {
+        console.log('Socket not connected, attempting to connect before challenge');
+        this.socket.connect();
+      }
       this.socket.emit('challenge', { roomCode }, resolve);
     });
   }
@@ -215,6 +294,10 @@ export class SocketHandler {
     message?: string;
   }> {
     return new Promise((resolve) => {
+      if (!this.socket.connected) {
+        console.log('Socket not connected, attempting to connect before reset');
+        this.socket.connect();
+      }
       this.socket.emit('resetGame', { roomCode, players }, resolve);
     });
   }
@@ -231,6 +314,10 @@ export class SocketHandler {
     error?: string;
   }> {
     return new Promise((resolve) => {
+      if (!this.socket.connected) {
+        console.log('Socket not connected, attempting to connect before reconnecting to room');
+        this.socket.connect();
+      }
       this.socket.emit('reconnectToRoom', { roomCode, playerName }, resolve);
     });
   }

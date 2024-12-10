@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { createRoom, joinRoom, startGame, placeBid, challenge, cleanup } from '../lib/socket';
+import socketHandler, { createRoom, joinRoom, startGame, placeBid, challenge, cleanup } from '../lib/socket';
 import { Player, Bid, GameStatus, GameMode, GameLogEntry } from '../types/game';
 import { generateComputerMove } from '../utils/computerAI';
 import { isValidBid, rollDice, isEndGameScenario, resolveChallengeOutcome } from '../utils/gameLogic';
@@ -10,7 +10,6 @@ import JoinGame from './JoinGame';
 import WaitingRoom from './WaitingRoom';
 import GameBoard from './GameBoard';
 import GameLog, { createLogEntry } from './GameLog';
-import socketHandler from '../lib/socket';
 
 type CreateRoomResponse = {
   success: boolean;
