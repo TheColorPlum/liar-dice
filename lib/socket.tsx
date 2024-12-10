@@ -2,7 +2,7 @@
 import { io, Socket } from 'socket.io-client';
 import { SocketHandler } from '../utils/socketHandler';
 
-const SOCKET_URL = 'http://localhost:3002';
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'https://lie-die.com:3002';
 console.log('Socket configuration initialized for:', SOCKET_URL);
 
 // Session management
