@@ -23,7 +23,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // More permissive CORS for local development
 const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production' 
-  ? ["https://lie-die.com", "http://lie-die.com", "https://www.lie-die.com", "http://www.lie-die.com"] 
+  ? ["https://lie-die.com", "http://lie-die.com", "https://www.lie-die.com", "http://www.lie-die.com", "wss://lie-die.com:3002"] 
   : ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3002"];
 
 const io = new Server(server, {
@@ -43,7 +43,17 @@ const io = new Server(server, {
   ...(process.env.NODE_ENV === 'production' && {
     path: '/socket.io/',
     serveClient: false,
-    cookie: false
+    cookie: false,
+    // Ensure WebSocket is properly secured
+    handlePreflightRequest: (req, res) => {
+      res.writeHead(200, {
+        "Access-Control-Allow-Origin": ALLOWED_ORIGINS.join(", "),
+        "Access-Control-Allow-Methods": "GET,POST",
+        "Access-Control-Allow-Headers": "my-custom-header",
+        "Access-Control-Allow-Credentials": true
+      });
+      res.end();
+    }
   })
 });
 
