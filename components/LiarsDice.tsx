@@ -64,6 +64,8 @@ const LiarsDice: React.FC = () => {
         }
         setIsReconnecting(false);
       }
+    } else {
+      setGameMode('start');
     }
   }, [addToGameLog]);
 
@@ -76,7 +78,7 @@ const LiarsDice: React.FC = () => {
     socketHandler.updateCallbacks({
       onConnect: () => {
         setConnectionError(null);
-        if (!isReconnecting) {
+        if (!isReconnecting && localStorage.getItem('roomInfo')) {
           attemptReconnection();
         }
       },
@@ -167,9 +169,14 @@ const LiarsDice: React.FC = () => {
     };
   }, [addToGameLog, players, gameMode, isReconnecting, attemptReconnection]);
 
-  // Try to reconnect on initial load
+  // Try to reconnect on initial load only if there's stored room info
   useEffect(() => {
-    attemptReconnection();
+    const storedInfo = localStorage.getItem('roomInfo');
+    if (storedInfo) {
+      attemptReconnection();
+    } else {
+      setGameMode('start');
+    }
   }, [attemptReconnection]);
 
   /**
