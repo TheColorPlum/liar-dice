@@ -57,7 +57,7 @@ export const isEndGameScenario = (players: Player[]): boolean => {
  * @param players - All players in the game
  * @param targetValue - The value to count
  * @param isEndGame - Whether the game is in end-game state
- * @returns The total count of matching dice
+ * @returns The total count of matching dice or sum in end-game
  */
 export const calculateDiceCount = (
   players: Player[],
@@ -65,9 +65,11 @@ export const calculateDiceCount = (
   isEndGame: boolean
 ): number => {
   if (isEndGame) {
+    // In end-game, we sum the dice values
     return players.reduce((sum, player) => sum + player.dice[0], 0);
   }
   
+  // In normal game, we count matching dice including ones as wild
   const allDice = players.flatMap(player => player.dice);
   return allDice.filter(die => die === targetValue || die === 1).length;
 };
@@ -93,14 +95,17 @@ export const resolveChallengeOutcome = (
   let outcome;
   
   if (isEndGame) {
-    if (currentBid.value > actualCount) {
-      loserIndex = bidderIndex;
+    // In end-game, the bid represents the sum of both dice
+    // Challenge succeeds if the actual sum is LESS than the bid
+    if (actualCount < currentBid.value) {
+      loserIndex = bidderIndex; // Bidder loses if they bid too high
       outcome = 'succeeded';
     } else {
-      loserIndex = challengerIndex;
+      loserIndex = challengerIndex; // Challenger loses if the sum is >= bid
       outcome = 'failed';
     }
   } else {
+    // Normal game - challenge succeeds if actual count is less than bid quantity
     if (actualCount < currentBid.quantity) {
       loserIndex = bidderIndex;
       outcome = 'succeeded';
@@ -116,6 +121,8 @@ export const resolveChallengeOutcome = (
     actualCount,
     challengerName: players[challengerIndex].name,
     bidderName: players[bidderIndex].name,
-    loserName: players[loserIndex].name
+    loserName: players[loserIndex].name,
+    challengerIndex,
+    bidderIndex
   };
 };

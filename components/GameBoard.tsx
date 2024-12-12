@@ -19,7 +19,9 @@ interface DiceIconProps {
  */
 const DiceIcon: React.FC<DiceIconProps> = ({ value, hidden, className = "" }) => {
   const DiceComponents = [Dice1, Dice2, Dice3, Dice4, Dice5, Dice6];
-  const Component = DiceComponents[hidden ? 5 : value - 1];
+  // Ensure value is within valid range for dice components
+  const safeValue = Math.min(Math.max(1, value), 6);
+  const Component = DiceComponents[hidden ? 5 : safeValue - 1];
   return (
     <div className={`dice ${className}`}>
       <Component className="w-6 h-6" />
@@ -124,10 +126,18 @@ const GameBoard: React.FC<GameBoardProps> = ({
               <div className="flex items-center space-x-2">
                 {currentBid && (
                   <>
-                    <span className="text-2xl font-bold">
-                      {isEndGame ? '' : currentBid.quantity + ' × '}
-                    </span>
-                    <DiceIcon value={currentBid.value} hidden={false} />
+                    {isEndGame ? (
+                      <span className="text-2xl font-bold">
+                        Sum: {currentBid.value}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="text-2xl font-bold">
+                          {currentBid.quantity} × 
+                        </span>
+                        <DiceIcon value={currentBid.value} hidden={false} />
+                      </>
+                    )}
                   </>
                 )}
                 {!currentBid && (
@@ -155,7 +165,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 )}
                 <Select onValueChange={setBidValue} value={bidValue}>
                   <SelectTrigger className="w-32">
-                    <SelectValue placeholder="Die Value" />
+                    <SelectValue placeholder={isEndGame ? "Sum Value" : "Die Value"} />
                   </SelectTrigger>
                   <SelectContent>
                     {(isEndGame ? 
