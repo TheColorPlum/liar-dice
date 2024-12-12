@@ -1,4 +1,5 @@
 import { Player, Bid, GAME_CONSTANTS } from '../types/game';
+import { isValidBid } from './gameLogic';
 
 /**
  * Generates a computer player's bid based on game state and strategy
@@ -14,13 +15,12 @@ export const generateComputerMove = (
   currentBid: Bid | null,
   isEndGame: boolean
 ): { shouldChallenge: boolean; bid?: Bid } => {
-  const totalDice = players.reduce((sum, player) => sum + player.diceCount, 0);
-  
-  if (isEndGame) {
+  // Special handling for end game scenario (2 players, 1 die each)
+  if (isEndGame && players.length === 2 && players.every(p => p.diceCount === 1)) {
     return generateEndGameMove(currentPlayer, currentBid);
   }
-  
-  return generateNormalGameMove(currentPlayer, players, currentBid, totalDice);
+
+  return generateNormalGameMove(currentPlayer, players, currentBid);
 };
 
 /**
@@ -31,31 +31,62 @@ const generateEndGameMove = (
   currentBid: Bid | null
 ): { shouldChallenge: boolean; bid?: Bid } => {
   const ownDie = currentPlayer.dice[0];
-  
+
   if (!currentBid) {
-    // Initial bid in end game
+    // Initial bid - bid own die value plus small buffer
     return {
       shouldChallenge: false,
       bid: {
         quantity: 1,
-        value: Math.min(ownDie + Math.floor(Math.random() * 3) + 1, GAME_CONSTANTS.MAX_END_GAME_BID)
+        value: Math.min(12, ownDie + 2)
       }
     };
   }
-  
-  // Challenge probability increases with bid value
-  const challengeProbability = (currentBid.value - ownDie) / GAME_CONSTANTS.MAX_END_GAME_BID;
-  if (Math.random() < challengeProbability) {
+
+  // Challenge if bid exceeds maximum possible sum
+  const maxPossibleSum = ownDie + GAME_CONSTANTS.DICE_SIDES;
+  if (currentBid.value > maxPossibleSum) {
     return { shouldChallenge: true };
   }
-  
+
+  // Challenge if bid is getting too close to maximum
+  if (currentBid.value >= maxPossibleSum - 2) { // Slightly more aggressive here
+    return { shouldChallenge: true };
+  }
+
+  // Make conservative bid increase if reasonable
   return {
     shouldChallenge: false,
     bid: {
       quantity: 1,
-      value: Math.min(currentBid.value + 1, GAME_CONSTANTS.MAX_END_GAME_BID)
+      value: currentBid.value + 1
     }
   };
+};
+
+/**
+ * Calculates confidence in a bid based on known dice and total dice
+ */
+const calculateBidConfidence = (
+  bid: Bid,
+  ownDiceCounts: { [key: number]: number },
+  totalDice: number,
+  ownDiceCount: number
+): number => {
+  const ownSupport = ownDiceCounts[bid.value] || 0;
+  const otherDice = totalDice - ownDiceCount;
+  const neededFromOthers = bid.quantity - ownSupport;
+  
+  // Base confidence on:
+  // 1. What percentage of needed dice we have
+  // 2. How reasonable it is to expect the remaining from others
+  const ownSupportRatio = ownSupport / bid.quantity;
+  const neededRatio = neededFromOthers / otherDice;
+  
+  // More confident if:
+  // - We have a higher percentage of needed dice
+  // - We need a lower percentage from others
+  return ownSupportRatio - (neededRatio * 0.6); // Reduced penalty for needed ratio
 };
 
 /**
@@ -64,71 +95,131 @@ const generateEndGameMove = (
 const generateNormalGameMove = (
   currentPlayer: Player,
   players: Player[],
-  currentBid: Bid | null,
-  totalDice: number
+  currentBid: Bid | null
 ): { shouldChallenge: boolean; bid?: Bid } => {
+  const totalDice = players.reduce((sum, player) => sum + player.diceCount, 0);
   const ownDice = currentPlayer.dice;
-  const diceCount = (value: number): number => 
-    ownDice.filter(d => d === value || d === 1).length;
+  const onesCount = ownDice.filter(d => d === 1).length;
   
-  // Calculate dice frequencies for own dice
-  const diceCounts = Array.from({ length: 6 }, (_, i) => diceCount(i + 1));
-  const mostCommonValue = diceCounts.indexOf(Math.max(...diceCounts)) + 1;
-  
+  // Count our matching dice for each value
+  const getOwnDiceCounts = () => {
+    const counts: { [key: number]: number } = {};
+    for (let i = 2; i <= 6; i++) {
+      const actualCount = ownDice.filter(d => d === i).length;
+      counts[i] = actualCount + onesCount;
+    }
+    return counts;
+  };
+
+  const ownDiceCounts = getOwnDiceCounts();
+
   if (!currentBid) {
-    // Initial bid strategy
-    const quantity = Math.max(1, Math.floor(diceCount(mostCommonValue) * (totalDice / currentPlayer.diceCount) * 0.8));
+    // Find our strongest value
+    const bestValue = Object.entries(ownDiceCounts)
+      .reduce((best, [value, count]) => count > best.count ? { value: Number(value), count } : best,
+        { value: 2, count: -1 });
+
+    // Initial bid based on our actual dice plus conservative estimate of others
+    const otherDice = totalDice - ownDice.length;
+    const expectedOthers = Math.floor(otherDice * 0.33); // Increased from 0.3 to 0.33
+    
+    const initialBid = {
+      quantity: Math.max(1, bestValue.count + expectedOthers),
+      value: bestValue.value
+    };
+
+    // Check if our initial bid violates our confidence interval
+    const confidence = calculateBidConfidence(initialBid, ownDiceCounts, totalDice, ownDice.length);
+    if (confidence < 0) {
+      // If even our best initial bid lacks confidence, start very conservatively
+      return {
+        shouldChallenge: false,
+        bid: {
+          quantity: 1,
+          value: GAME_CONSTANTS.MIN_BID_VALUE
+        }
+      };
+    }
+
     return {
       shouldChallenge: false,
-      bid: { quantity, value: mostCommonValue }
+      bid: initialBid
     };
   }
+
+  // First check confidence in current bid
+  const currentBidConfidence = calculateBidConfidence(currentBid, ownDiceCounts, totalDice, ownDice.length);
   
-  // Evaluate current bid probability
-  const ownCount = diceCount(currentBid.value);
-  const estimatedTotal = Math.round(ownCount * (totalDice / currentPlayer.diceCount));
-  const confidenceThreshold = 0.6 + (Math.random() * 0.2);
-  
-  if (estimatedTotal < currentBid.quantity * confidenceThreshold) {
-    const challengeProbability = 1 - (estimatedTotal / (currentBid.quantity * confidenceThreshold));
-    if (Math.random() < challengeProbability) {
-      return { shouldChallenge: true };
-    }
+  // If current bid already violates our confidence interval, challenge
+  if (currentBidConfidence < -0.35) { // Slightly more tolerant before challenging
+    return { shouldChallenge: true };
   }
-  
-  // Generate new bid based on strategy
-  const riskFactor = Math.random();
-  let newBid: Bid;
-  
-  if (riskFactor < 0.4) {
-    // Increase quantity
-    newBid = {
-      quantity: currentBid.quantity + 1,
-      value: currentBid.value
-    };
-  } else if (riskFactor < 0.7) {
-    // Increase value
-    newBid = {
-      quantity: currentBid.quantity,
-      value: Math.min(currentBid.value + 1, GAME_CONSTANTS.DICE_SIDES)
-    };
-  } else {
-    // Increase both (aggressive play)
-    newBid = {
-      quantity: currentBid.quantity + 1,
-      value: Math.min(currentBid.value + 1, GAME_CONSTANTS.DICE_SIDES)
-    };
+
+  // Find our best possible bids based on our dice
+  const findPossibleBids = (): Bid[] => {
+    const possibleBids: Bid[] = [];
+    const otherDice = totalDice - ownDice.length;
+
+    // For each value we have
+    Object.entries(ownDiceCounts).forEach(([valueStr, count]) => {
+      const value = Number(valueStr);
+      if (count === 0) return;
+
+      // Calculate reasonable quantities based on our count
+      const minQuantity = currentBid ? currentBid.quantity : 1;
+      const maxQuantity = Math.min(
+        totalDice,
+        count + Math.ceil(otherDice * 0.5) // Assume up to half of other dice might match
+      );
+
+      // Try different quantities
+      for (let qty = minQuantity; qty <= maxQuantity; qty++) {
+        const bid = { quantity: qty, value };
+        if (isValidBid(bid, currentBid, false)) {
+          // Only include bids that don't violate our confidence interval
+          const confidence = calculateBidConfidence(bid, ownDiceCounts, totalDice, ownDice.length);
+          if (confidence >= -0.15) { // Slightly more tolerant of risky bids
+            possibleBids.push(bid);
+          }
+        }
+      }
+    });
+
+    return possibleBids;
+  };
+
+  // Get all possible bids that don't violate our confidence interval
+  const possibleBids = findPossibleBids();
+
+  // If we have no confident bids, challenge the current bid
+  if (possibleBids.length === 0) {
+    return { shouldChallenge: true };
   }
-  
-  // Adjust bid based on probability
-  const probability = (newBid.quantity / totalDice) * (1/6 + (newBid.value === 1 ? 1/6 : 0));
-  if (probability > 0.8) {
-    newBid.quantity = Math.max(currentBid.quantity, Math.floor(newBid.quantity * 0.8));
+
+  // Evaluate each possible bid
+  const evaluateBid = (bid: Bid): number => {
+    const confidence = calculateBidConfidence(bid, ownDiceCounts, totalDice, ownDice.length);
+    const valueBonus = bid.value / 20; // Small bonus for higher values
+    return confidence + valueBonus;
+  };
+
+  // Sort bids by their score
+  const scoredBids = possibleBids
+    .map(bid => ({ bid, score: evaluateBid(bid) }))
+    .sort((a, b) => b.score - a.score);
+
+  // Take our best confident bid
+  const bestBid = scoredBids[0].bid;
+  const bestConfidence = calculateBidConfidence(bestBid, ownDiceCounts, totalDice, ownDice.length);
+
+  // If even our best bid has low confidence, challenge instead
+  if (bestConfidence < -0.2) { // Slightly more tolerant before falling back to challenge
+    return { shouldChallenge: true };
   }
-  
+
   return {
     shouldChallenge: false,
-    bid: newBid
+    bid: bestBid
   };
 };
 
@@ -144,10 +235,15 @@ export const calculateBidProbability = (
   ownDice: number[],
   totalDice: number
 ): number => {
-  const ownMatches = ownDice.filter(d => d === bid.value || d === 1).length;
+  const actualMatches = ownDice.filter(d => d === bid.value).length;
+  const onesCount = ownDice.filter(d => d === 1).length;
+  const ownMatches = actualMatches + onesCount;
   const remainingDice = totalDice - ownDice.length;
-  const expectedMatchesPerDie = 1/6 + (bid.value === 1 ? 1/6 : 0);
-  const expectedOtherMatches = remainingDice * expectedMatchesPerDie;
   
-  return (ownMatches + expectedOtherMatches) / bid.quantity;
+  // More optimistic probability calculation
+  const expectedProbabilityPerDie = 0.33; // Increased from 0.3 to 0.33
+  const expectedOtherMatches = remainingDice * expectedProbabilityPerDie;
+  const expectedTotal = ownMatches + expectedOtherMatches;
+  
+  return expectedTotal / bid.quantity;
 };

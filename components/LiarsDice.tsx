@@ -222,22 +222,36 @@ const LiarsDice: React.FC = () => {
 
         onBidPlaced: (data) => {
           setCurrentBid(data.bid);
-          setCurrentPlayerIndex(data.nextPlayerIndex);
-          const actionMessage = `${data.playerName} bid ${data.bid.quantity}x${data.bid.value}`;
+          // Find next player with dice
+          let nextIndex = data.nextPlayerIndex;
+          const activePlayers = players.filter(p => p.diceCount > 0);
+          const nextPlayerWithDice = activePlayers.findIndex(p => p.id === players[nextIndex].id);
+          if (nextPlayerWithDice !== -1) {
+            nextIndex = players.findIndex(p => p.id === activePlayers[nextPlayerWithDice].id);
+          }
+          setCurrentPlayerIndex(nextIndex);
+          let actionMessage;
+          if (isEndGame) {
+            actionMessage = `${data.playerName} bid sum of ${data.bid.value}`;
+          } else {
+            actionMessage = `${data.playerName} bid ${data.bid.quantity}x${data.bid.value}`;
+          }
           setLastAction(actionMessage);
           setGameLog(prev => [createLogEntry(actionMessage), ...prev]);
         },
 
         onChallengeResult: (result) => {
-          setPlayers(result.players);
+          // Update players, removing those with 0 dice
+          const updatedPlayers = result.players.filter(p => p.diceCount > 0);
+          setPlayers(updatedPlayers);
           setCurrentBid(null);
           let actionMessage;
-          if (result.outcome === 'succeeded') {
-            // Challenge succeeded - bidder loses
-            actionMessage = `${result.challengerName} challenged ${result.bidderName}'s bid of ${result.bid.quantity}x${result.bid.value} and won! There were only ${result.actualCount} ${result.bid.value}'s`;
+          if (isEndGame) {
+            actionMessage = `${result.challengerName} challenged ${result.bidderName}'s bid that the sum would be ${result.bid.value}! ` +
+              `The actual sum was ${result.actualCount}. ${result.loserName} loses a die!`;
           } else {
-            // Challenge failed - challenger loses
-            actionMessage = `${result.challengerName} challenged ${result.bidderName}'s bid of ${result.bid.quantity}x${result.bid.value} and lost! There were ${result.actualCount} ${result.bid.value}'s`;
+            actionMessage = `${result.challengerName} challenged ${result.bidderName}'s bid of ${result.bid.quantity}x${result.bid.value}! ` +
+              `There were ${result.actualCount} ${result.bid.value}'s. ${result.loserName} loses a die!`;
           }
           setLastAction(actionMessage);
           setGameLog(prev => [createLogEntry(actionMessage), ...prev]);
@@ -245,8 +259,16 @@ const LiarsDice: React.FC = () => {
 
         onNewRound: (data) => {
           console.log('New round started, current player:', data.currentPlayerIndex);
-          setPlayers(data.players);
-          setCurrentPlayerIndex(data.currentPlayerIndex);
+          // Only include players with dice
+          const activePlayers = data.players.filter(p => p.diceCount > 0);
+          setPlayers(activePlayers);
+          // Adjust currentPlayerIndex if needed
+          let nextIndex = data.currentPlayerIndex;
+          const nextPlayerWithDice = activePlayers.findIndex(p => p.id === data.players[nextIndex].id);
+          if (nextPlayerWithDice !== -1) {
+            nextIndex = data.players.findIndex(p => p.id === activePlayers[nextPlayerWithDice].id);
+          }
+          setCurrentPlayerIndex(nextIndex);
           setCurrentBid(data.currentBid);
         },
 
@@ -266,7 +288,7 @@ const LiarsDice: React.FC = () => {
         socketHandler.updateCallbacks({});
       };
     }
-  }, [gameMode, players, startNewRound, resetGame, playerName]);
+  }, [gameMode, players, startNewRound, resetGame, playerName, isEndGame]);
 
   /**
    * Handles creating a new game
@@ -389,8 +411,20 @@ const LiarsDice: React.FC = () => {
         alert(error.message || "Failed to place bid. Please try again.");
       });
     } else {
-      setCurrentPlayerIndex((prevIndex) => (prevIndex + 1) % players.length);
-      const actionMessage = `${players[currentPlayerIndex].name} bid ${quantity}x${value}`;
+      // Find next player with dice
+      const activePlayers = players.filter(p => p.diceCount > 0);
+      let nextIndex = (currentPlayerIndex + 1) % players.length;
+      while (players[nextIndex].diceCount === 0) {
+        nextIndex = (nextIndex + 1) % players.length;
+      }
+      setCurrentPlayerIndex(nextIndex);
+      
+      let actionMessage;
+      if (isEndGame) {
+        actionMessage = `${players[currentPlayerIndex].name} bid sum of ${value}`;
+      } else {
+        actionMessage = `${players[currentPlayerIndex].name} bid ${quantity}x${value}`;
+      }
       setLastAction(actionMessage);
       setGameLog(prev => [createLogEntry(actionMessage), ...prev]);
     }
@@ -415,29 +449,40 @@ const LiarsDice: React.FC = () => {
         isEndGame
       );
       
-      setPlayers(prev => prev.map((p, i) => 
+      // Update players and remove those with 0 dice
+      const updatedPlayers = players.map((p, i) => 
         i === outcome.loserIndex
           ? { ...p, diceCount: p.diceCount - 1, dice: p.dice.slice(1) }
           : p
-      ));
+      ).filter(p => p.diceCount > 0); // Remove players with 0 dice
+      
+      setPlayers(updatedPlayers);
 
-      const actionMessage = `${outcome.challengerName} challenged ${outcome.bidderName}'s bid of ${currentBid.quantity}x${currentBid.value}! ` +
-        `There were ${outcome.actualCount} ${currentBid.value}'s. ${outcome.loserName} loses a die!`;
+      let actionMessage;
+      if (isEndGame) {
+        actionMessage = `${outcome.challengerName} challenged ${outcome.bidderName}'s bid that the sum would be ${currentBid.value}! ` +
+          `The actual sum was ${outcome.actualCount}. ${outcome.loserName} loses a die!`;
+      } else {
+        actionMessage = `${outcome.challengerName} challenged ${outcome.bidderName}'s bid of ${currentBid.quantity}x${currentBid.value}! ` +
+          `There were ${outcome.actualCount} ${currentBid.value}'s. ${outcome.loserName} loses a die!`;
+      }
+      
       setLastAction(actionMessage);
       setGameLog(prev => [createLogEntry(actionMessage), ...prev]);
       
-      const remainingPlayers = players.filter(p => 
-        p.diceCount > 1 || (p.diceCount === 1 && players[outcome.loserIndex].id !== p.id)
-      );
-      
-      if (remainingPlayers.length === 1) {
+      if (updatedPlayers.length === 1) {
         setGameStatus('gameOver');
-        const winner = remainingPlayers[0];
+        const winner = updatedPlayers[0];
         setGameLog(prev => [createLogEntry(`Game Over! ${winner.name} wins!`), ...prev]);
       } else {
         setCurrentBid(null);
-        // Set the loser as the first player in the next round
-        setCurrentPlayerIndex(outcome.loserIndex);
+        // Find next active player index
+        const loserIndex = outcome.loserIndex;
+        let nextIndex = loserIndex;
+        while (!updatedPlayers.some(p => p.id === players[nextIndex].id)) {
+          nextIndex = (nextIndex + 1) % players.length;
+        }
+        setCurrentPlayerIndex(nextIndex);
         startNewRound();
       }
     }
