@@ -88,6 +88,30 @@ npm run dev
 
 3. Open [http://localhost:3000](http://localhost:3000) in your browser
 
+## Production Deployment
+
+### SSH Access
+To connect to the production server:
+```bash
+ssh -i "/Users/plum/Downloads/liars-dice-new-key.pem" ec2-user@100.24.14.46
+```
+
+### Application Management
+The application runs using PM2 process manager. Common commands:
+```bash
+# Start the application
+pm2 start ecosystem.config.js
+
+# Check application status
+pm2 list
+
+# View logs
+pm2 logs
+
+# Restart application
+pm2 restart all
+```
+
 ## Development
 
 ### Adding New Features
