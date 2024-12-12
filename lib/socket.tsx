@@ -2,7 +2,11 @@
 import { io, Socket } from 'socket.io-client';
 import { SocketHandler } from '../utils/socketHandler';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'https://lie-die.com:3002';
+// In production, use the same domain without port since nginx handles the WebSocket proxy
+const SOCKET_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://lie-die.com'  // Changed to use main domain in production
+  : 'http://localhost:3002';
+
 console.log('Socket configuration initialized for:', SOCKET_URL);
 
 // Session management
@@ -39,14 +43,15 @@ const initialPlayerName = session?.playerName || '';
 
 // Initialize socket with auto-connect enabled and player name in query
 const socket = io(SOCKET_URL, {
+  path: '/socket.io/',  // Explicitly set the path
   transports: ['websocket', 'polling'],
   reconnection: true,
   reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
   reconnectionDelay: RECONNECT_DELAY,
   reconnectionDelayMax: 5000,
   timeout: 20000,
-  autoConnect: true,    // Enable auto-connect
-  forceNew: true,       // Force new connection for each window
+  autoConnect: true,
+  forceNew: true,
   query: {
     playerName: initialPlayerName
   }
