@@ -436,7 +436,8 @@ const LiarsDice: React.FC = () => {
         setGameLog(prev => [createLogEntry(`Game Over! ${winner.name} wins!`), ...prev]);
       } else {
         setCurrentBid(null);
-        setCurrentPlayerIndex((outcome.loserIndex + 1) % players.length);
+        // Set the loser as the first player in the next round
+        setCurrentPlayerIndex(outcome.loserIndex);
         startNewRound();
       }
     }
