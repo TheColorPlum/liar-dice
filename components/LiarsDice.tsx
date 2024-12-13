@@ -10,6 +10,8 @@ import JoinGame from './JoinGame';
 import WaitingRoom from './WaitingRoom';
 import GameBoard from './GameBoard';
 import GameLog, { createLogEntry } from './GameLog';
+import { Card, CardHeader, CardContent, CardFooter, CardTitle, CardDescription } from './ui/card';
+import { Button } from './ui/button';
 
 type CreateRoomResponse = {
   success: boolean;
@@ -36,6 +38,7 @@ const LiarsDice: React.FC = () => {
   const [gameLog, setGameLog] = useState<GameLogEntry[]>([createLogEntry('Game started')]);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
   const [isDisconnected, setIsDisconnected] = useState<boolean>(false);
+  const [initialPlayerCount, setInitialPlayerCount] = useState<number>(0);
 
   // Reset game state
   const resetGame = useCallback(() => {
@@ -54,6 +57,7 @@ const LiarsDice: React.FC = () => {
     setLastAction('Game started');
     setGameLog([createLogEntry('Game started')]);
     setIsDisconnected(false);
+    setInitialPlayerCount(0);
     localStorage.removeItem('liarsDiceSession');
   }, [gameMode]);
 
@@ -352,6 +356,8 @@ const LiarsDice: React.FC = () => {
    * Handles starting a single player game
    */
   const handleStartSinglePlayer = (playerCount: number) => {
+    setInitialPlayerCount(playerCount);
+    setCurrentBid(null);
     const computerPlayers = Array.from({ length: playerCount - 1 }, (_, i) => ({
       id: `computer-${i}`,
       name: `Computer ${i + 1}`,
@@ -587,21 +593,48 @@ const LiarsDice: React.FC = () => {
     }
 
     if (gameStatus === 'gameOver') {
+      const winner = players[0]; // Winner is the last player remaining
+      const isPlayerWinner = winner.isHuman;
+
       return (
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <h2 className="text-4xl font-bold mb-8 bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent">
-              Game Over!
-            </h2>
-            <div className="space-y-4">
-              <button
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+          <Card className="w-[90%] max-w-md mx-auto">
+            <CardHeader>
+              <CardTitle className="text-center bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent">
+                Game Over!
+              </CardTitle>
+              <CardDescription className="text-center text-lg mt-2">
+                {isPlayerWinner ? 
+                  "Congratulations! You've won the game!" :
+                  `${winner.name} has won the game!`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-center text-muted-foreground">
+                {isPlayerWinner ?
+                  "You've outplayed your opponents and emerged victorious!" :
+                  "Better luck next time! Keep practicing your bluffing skills."}
+              </p>
+            </CardContent>
+            <CardFooter className="flex flex-col space-y-2">
+              {gameMode === 'singlePlayer' && (
+                <Button 
+                  onClick={() => handleStartSinglePlayer(initialPlayerCount)}
+                  className="w-full"
+                  variant="default"
+                >
+                  Play Again
+                </Button>
+              )}
+              <Button 
                 onClick={resetGame}
-                className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+                className="w-full"
+                variant="secondary"
               >
                 Return to Main Menu
-              </button>
-            </div>
-          </div>
+              </Button>
+            </CardFooter>
+          </Card>
         </div>
       );
     }

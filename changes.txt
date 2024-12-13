@@ -1,0 +1,80 @@
+# Changes needed in LiarsDice.tsx with line numbers
+
+1. Add initialPlayerCount state (line 53, after other state declarations):
+const [initialPlayerCount, setInitialPlayerCount] = useState<number>(0);
+
+2. Modify handleStartSinglePlayer function (starting at line 363):
+const handleStartSinglePlayer = (playerCount: number) => {
+  setInitialPlayerCount(playerCount);  // Add this line at the start
+  setCurrentBid(null);  // Add this line after initialPlayerCount
+  const computerPlayers = Array.from({ length: playerCount - 1 }, (_, i) => ({
+    id: `computer-${i}`,
+    name: `Computer ${i + 1}`,
+    diceCount: 5,
+    dice: rollDice(5),
+    isHuman: false,
+    connected: true
+  }));
+
+  const humanPlayer = {
+    id: 'human',
+    name: 'You',
+    diceCount: 5,
+    dice: rollDice(5),
+    isHuman: true,
+    connected: true
+  };
+
+  setPlayers([humanPlayer, ...computerPlayers]);
+  setGameStatus('playing');
+  setGameMode('singlePlayer');
+  setCurrentPlayerIndex(0);
+};
+
+3. Add initialPlayerCount reset to resetGame function (line 71):
+const resetGame = useCallback(() => {
+  if (gameMode === 'multiplayer') {
+    cleanup();
+  }
+  setPlayerName('');
+  setRoomCode('');
+  setPlayerId('');
+  setPlayers([]);
+  setGameStatus('waiting');
+  setGameMode('start');
+  setCurrentBid(null);
+  setCurrentPlayerIndex(0);
+  setIsEndGame(false);
+  setLastAction('Game started');
+  setGameLog([createLogEntry('Game started')]);
+  setIsDisconnected(false);
+  setInitialPlayerCount(0);  // Add this line before localStorage.removeItem
+  localStorage.removeItem('liarsDiceSession');
+}, [gameMode]);
+
+4. The Play Again button code is already correct (around line 644):
+<Button 
+  onClick={() => handleStartSinglePlayer(initialPlayerCount)}
+  className="w-full"
+  variant="default"
+>
+  Play Again
+</Button>
+
+Instructions:
+1. Add the initialPlayerCount state declaration after the other state declarations (around line 53)
+2. Update the handleStartSinglePlayer function to include setInitialPlayerCount(playerCount) and setCurrentBid(null) at the start of the function (around line 363)
+3. Add setInitialPlayerCount(0) to the resetGame function before localStorage.removeItem (around line 71)
+4. No changes needed for the Play Again button as it's already using initialPlayerCount correctly
+
+The key changes are:
+- Adding the initialPlayerCount state
+- Setting it when starting a game
+- Resetting currentBid when starting a new game
+- Resetting initialPlayerCount when returning to main menu
+
+These changes will ensure that:
+1. We track the original number of players
+2. We properly reset the bid state when starting a new game
+3. We clean up all state when returning to main menu
+4. The game log from the previous game is preserved when using Play Again
