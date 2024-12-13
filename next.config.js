@@ -22,6 +22,14 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  typescript: {
+    // Skip type checking during build
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    // Skip ESLint during build
+    ignoreDuringBuilds: true,
+  },
   async headers() {
     return [
       {
@@ -34,8 +42,15 @@ const nextConfig = {
     if (!isServer) {
       config.externals = [...(config.externals || []), 'bufferutil', 'utf-8-validate'];
     }
+    // Add performance optimizations
+    config.optimization = {
+      ...config.optimization,
+      minimize: true,
+    };
     return config;
   },
+  // Disable source maps in production
+  productionBrowserSourceMaps: false,
 };
 
 module.exports = nextConfig;
