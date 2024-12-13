@@ -5,7 +5,7 @@ import { Card, CardHeader, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Dice1, Dice2, Dice3, Dice4, Dice5, Dice6 } from 'lucide-react';
+import { Dice1, Dice2, Dice3, Dice4, Dice5, Dice6, HelpCircle } from 'lucide-react';
 import { Player, Bid, GAME_CONSTANTS } from '../types/game';
 
 interface DiceIconProps {
@@ -19,9 +19,17 @@ interface DiceIconProps {
  */
 const DiceIcon: React.FC<DiceIconProps> = ({ value, hidden, className = "" }) => {
   const DiceComponents = [Dice1, Dice2, Dice3, Dice4, Dice5, Dice6];
+  // If hidden, show question mark, otherwise show the appropriate dice face
+  if (hidden) {
+    return (
+      <div className={`dice ${className}`}>
+        <HelpCircle className="w-6 h-6" />
+      </div>
+    );
+  }
   // Ensure value is within valid range for dice components
   const safeValue = Math.min(Math.max(1, value), 6);
-  const Component = DiceComponents[hidden ? 5 : safeValue - 1];
+  const Component = DiceComponents[safeValue - 1];
   return (
     <div className={`dice ${className}`}>
       <Component className="w-6 h-6" />
