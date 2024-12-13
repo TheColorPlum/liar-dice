@@ -49,8 +49,17 @@ npm install
 echo "Building application..."
 npm run build
 
-echo "Restarting PM2 process..."
-pm2 restart liar-dice
+echo "Stopping all PM2 processes..."
+pm2 delete all || true
+
+echo "Starting server process..."
+pm2 start server.js --name liar-dice
+
+echo "Starting client process..."
+pm2 start npm --name client -- start
+
+echo "Saving PM2 process list..."
+pm2 save
 
 echo "Checking nginx configuration..."
 if [ -f "/etc/nginx/conf.d/liar-dice.conf" ]; then
@@ -77,5 +86,8 @@ if [ "$STASHED" = true ]; then
         echo "Stashed changes restored"
     fi
 fi
+
+echo "Verifying processes..."
+pm2 status
 
 echo "Deployment completed successfully!"
