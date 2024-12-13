@@ -1,141 +1,125 @@
 # Liar's Dice Game
 
-A multiplayer implementation of the classic Liar's Dice game using Next.js, TypeScript, and WebSocket for real-time gameplay.
+A multiplayer implementation of the classic game Liar's Dice.
 
-## Project Structure
+## Development
 
-```
-liar-dice/
-├── app/                    # Next.js app directory
-├── components/            # React components
-│   ├── GameBoard.tsx     # Main game board display
-│   ├── GameControls.tsx  # Game control buttons and setup screens
-│   ├── GameLog.tsx       # Game event log display
-│   └── LiarsDice.tsx     # Main game component
-├── types/                # TypeScript type definitions
-│   └── game.ts          # Game-related types and constants
-├── utils/               # Utility functions
-│   ├── computerAI.ts    # Computer player logic
-│   ├── gameLogic.ts     # Core game rules and logic
-│   └── socketHandler.ts # WebSocket communication handler
-```
+### Prerequisites
+- Node.js (v18 or later)
+- npm
 
-## Features
-
-- Single player mode with AI opponents
-- Multiplayer mode with real-time gameplay
-- Customizable number of players (2-6)
-- Game log tracking all actions
-- End-game scenarios
-- Automatic dice rolling
-- Challenge system
-- Room-based multiplayer
-
-## Game Rules
-
-1. Each player starts with 5 dice
-2. Players take turns making bids about the total number of dice showing a particular value
-3. A bid consists of a quantity and a value (e.g., "four 3's")
-4. Each new bid must be higher than the previous bid (either in quantity or value)
-5. Players can challenge the previous bid if they think it's false
-6. Ones (1's) are wild and count as any value
-7. The loser of each round loses one die
-8. Players are eliminated when they lose all their dice
-9. The last player with dice wins
-
-### End Game Rules
-- When only two players remain with one die each, the bidding changes
-- Players only bid on the total value of both dice
-- The higher bid wins unless challenged
-
-## Technical Implementation
-
-### Components
-
-- **GameBoard**: Handles the display of players, dice, and current game state
-- **GameControls**: Manages game setup and control actions
-- **GameLog**: Displays a scrollable history of game events
-- **LiarsDice**: Main component orchestrating game flow
-
-### Utilities
-
-- **computerAI.ts**: Implements computer player strategy
-  - Probability-based decision making
-  - Dynamic risk assessment
-  - Adaptive bidding strategy
-
-- **gameLogic.ts**: Core game mechanics
-  - Bid validation
-  - Challenge resolution
-  - Game state management
-
-- **socketHandler.ts**: Real-time communication
-  - WebSocket event handling
-  - Room management
-  - Player synchronization
-
-## Setup and Running
-
-1. Install dependencies:
+### Setup
+1. Clone the repository
+2. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Start the development server:
+3. Start the development server:
 ```bash
-npm run dev
+npm run dev:all
 ```
 
-3. Open [http://localhost:3000](http://localhost:3000) in your browser
+This will start both the Next.js frontend and the WebSocket game server.
 
-## Production Deployment
-
-### SSH Access
-To connect to the production server:
-```bash
-ssh -i "/Users/plum/Downloads/liars-dice-new-key.pem" ec2-user@100.24.14.46
-```
-
-### Application Management
-The application runs using PM2 process manager. Common commands:
-```bash
-# Start the application
-pm2 start ecosystem.config.js
-
-# Check application status
-pm2 list
-
-# View logs
-pm2 logs
-
-# Restart application
-pm2 restart all
-```
-
-## Development
-
-### Adding New Features
-
-1. Define types in `types/game.ts`
-2. Implement game logic in `utils/`
-3. Create/update components in `components/`
-4. Update socket handlers if needed
-
-### Testing
-
+## Testing
 Run the test suite:
 ```bash
 npm test
 ```
 
-## Contributing
+## Deployment
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+### Prerequisites
+- Node.js v18 or later
+- PM2 (installed globally)
+- Nginx
+- SSL certificates from Let's Encrypt for lie-die.com
+
+### Initial Server Setup
+1. Install required software:
+```bash
+# Install Node.js 18
+nvm install 18
+nvm use 18
+
+# Install PM2 globally
+npm install -g pm2
+
+# Install nginx
+sudo yum install nginx
+```
+
+2. Set up SSL certificates using Let's Encrypt/Certbot
+3. Copy nginx configuration:
+```bash
+sudo cp nginx/liar-dice.conf /etc/nginx/conf.d/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Deployment Process
+For regular deployments, use the provided deployment script:
+```bash
+./deploy.sh
+```
+
+The deployment script will:
+- Pull latest changes
+- Install dependencies
+- Build the application
+- Restart PM2 processes
+- Verify nginx configuration
+- Reload nginx if needed
+- Verify services are running
+
+### Manual Deployment Steps
+If you need to deploy manually, follow these steps:
+
+1. Pull latest changes:
+```bash
+git pull origin main
+```
+
+2. Install dependencies and build:
+```bash
+npm install
+npm run build
+```
+
+3. Start/restart services:
+```bash
+# Start/restart WebSocket server
+pm2 restart server
+
+# Start/restart Next.js frontend
+NODE_ENV=production pm2 restart client
+
+# Save PM2 process list
+pm2 save
+```
+
+4. Verify nginx and reload if needed:
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Monitoring
+- View PM2 process status: `pm2 status`
+- Monitor resources: `pm2 monit`
+- View logs:
+  - PM2 logs: `pm2 logs`
+  - Nginx access logs: `sudo tail -f /var/log/nginx/access.log`
+  - Nginx error logs: `sudo tail -f /var/log/nginx/error.log`
+
+### Configuration Files
+- Nginx configuration: `nginx/liar-dice.conf`
+- Deployment script: `deploy.sh`
+- Deployment documentation: `deploy.md`
+
+### Troubleshooting
+See [deploy.md](deploy.md) for detailed troubleshooting steps and common issues.
 
 ## License
-
-MIT License - feel free to use this code for your own projects!
+MIT
