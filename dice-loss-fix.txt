@@ -1,0 +1,36 @@
+Issue: When a player loses a challenge, their dice count is decremented but their dice array is not properly updated.
+
+Location: server.js - challenge event handler
+
+Current Code:
+```javascript
+// Update both diceCount and dice array for the loser
+room.players[loserIndex].diceCount--;
+// Remove one die from the loser's dice array
+if (room.players[loserIndex].dice.length > 0) {
+  room.players[loserIndex].dice.pop();
+}
+```
+
+The issue is that we're just using .pop() which removes the last die arbitrarily. Instead, we should:
+1. Decrement the diceCount
+2. Generate a new dice array with the correct number of dice
+
+Proposed Fix:
+```javascript
+// Update diceCount for the loser
+room.players[loserIndex].diceCount--;
+// Generate new dice array with correct count
+if (room.players[loserIndex].diceCount > 0) {
+  room.players[loserIndex].dice = rollDice(room.players[loserIndex].diceCount);
+} else {
+  room.players[loserIndex].dice = [];
+}
+```
+
+This fix ensures that:
+1. The dice count is properly decremented
+2. A new set of dice is rolled with the correct count
+3. If the player loses their last die, their dice array is properly emptied
+
+The change uses the existing rollDice function which is already properly implemented to generate random dice values. This maintains consistency with how dice are handled in other parts of the game, like when starting a new round.
