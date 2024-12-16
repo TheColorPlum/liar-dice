@@ -55,7 +55,7 @@ export const isEndGameScenario = (players: Player[]): boolean => {
 /**
  * Calculates the actual count of dice matching a value
  * @param players - All players in the game
- * @param targetValue - The value to count
+ * @param targetValue - The value to count (ignored in endgame as we sum all dice)
  * @param isEndGame - Whether the game is in end-game state
  * @returns The total count of matching dice or sum in end-game
  */
@@ -65,8 +65,12 @@ export const calculateDiceCount = (
   isEndGame: boolean
 ): number => {
   if (isEndGame) {
-    // In end-game, we sum the dice values
-    return players.reduce((sum, player) => sum + player.dice[0], 0);
+    // In end-game, we sum all dice values regardless of targetValue
+    return players.reduce((sum, player) => {
+      const diceValue = player.dice[0] || 0;  // Use 0 if no dice
+      console.log(`Player ${player.name} dice: ${diceValue}`); // Debug log
+      return sum + diceValue;
+    }, 0);
   }
   
   // In normal game, we count matching dice including ones as wild

@@ -81,29 +81,29 @@ function getNextConnectedPlayerIndex(room, currentIndex) {
     return -1;
   }
 
-  const connectedPlayers = room.players.filter(p => p.connected);
-  if (connectedPlayers.length === 0) {
+  const activePlayers = room.players.filter(p => p.connected && !p.eliminated);
+  if (activePlayers.length === 0) {
     return -1;
   }
 
-  // If current player is the only one connected, return their index
-  if (connectedPlayers.length === 1) {
-    return room.players.findIndex(p => p.connected);
+  // If current player is the only one active, return their index
+  if (activePlayers.length === 1) {
+    return room.players.findIndex(p => p.connected && !p.eliminated);
   }
 
-  // Find next connected player
+  // Find next active player
   let nextIndex = (currentIndex + 1) % room.players.length;
   const startIndex = nextIndex;
 
   do {
-    if (room.players[nextIndex] && room.players[nextIndex].connected) {
+    if (room.players[nextIndex] && room.players[nextIndex].connected && !room.players[nextIndex].eliminated) {
       return nextIndex;
     }
     nextIndex = (nextIndex + 1) % room.players.length;
   } while (nextIndex !== startIndex);
 
-  // If we couldn't find a next connected player, return the first connected player's index
-  return room.players.findIndex(p => p.connected);
+  // If we couldn't find a next active player, return the first active player's index
+  return room.players.findIndex(p => p.connected && !p.eliminated);
 }
 
 function checkRoomValidity(room) {
@@ -212,29 +212,34 @@ function cleanupPlayerDisconnect(socket, room, playerIndex) {
     startTime: Date.now()
   });
 
-  console.log(`Set disconnect timer for ${player.name} in room ${room.code}`);
-
   io.to(room.code).emit('playerDisconnected', {
     playerName: player.name,
     playerIndex,
     reconnectGracePeriod: RECONNECT_GRACE_PERIOD
   });
 
+  // Only pass turn if it's a game-ending disconnect (after grace period)
+  // This way, if they reconnect quickly, they can still take their turn
   if (room.gameState === 'playing' && room.currentPlayerIndex === playerIndex) {
-    const nextIndex = getNextConnectedPlayerIndex(room, playerIndex);
-    if (nextIndex !== -1 && nextIndex !== playerIndex) {
-      room.currentPlayerIndex = nextIndex;
-      const nextPlayer = room.players[nextIndex];
-      if (nextPlayer) {
-        console.log(`Turn passed to ${nextPlayer.name} after ${player.name} disconnected`);
-        io.to(room.code).emit('bidPlaced', {
-          bid: room.currentBid,
-          nextPlayerIndex: nextIndex,
-          playerName: nextPlayer.name,
-          playerId: nextPlayer.id
-        });
+    setTimeout(() => {
+      // After grace period, check if player is still disconnected
+      if (!player.connected) {
+        const nextIndex = getNextConnectedPlayerIndex(room, playerIndex);
+        if (nextIndex !== -1 && nextIndex !== playerIndex) {
+          room.currentPlayerIndex = nextIndex;
+          const nextPlayer = room.players[nextIndex];
+          if (nextPlayer) {
+            console.log(`Turn passed to ${nextPlayer.name} after ${player.name} disconnect grace period expired`);
+            io.to(room.code).emit('bidPlaced', {
+              bid: room.currentBid,
+              nextPlayerIndex: nextIndex,
+              playerName: nextPlayer.name,
+              playerId: nextPlayer.id
+            });
+          }
+        }
       }
-    }
+    }, RECONNECT_GRACE_PERIOD);
   }
 }
 
@@ -296,7 +301,25 @@ io.on('connection', (socket) => {
     for (const [roomCode, room] of rooms.entries()) {
       const playerIndex = room.players.findIndex(p => p.id === socket.id);
       if (playerIndex !== -1) {
+        // Store current game state before cleanup
+        const gameState = {
+          currentBid: room.currentBid,
+          currentPlayerIndex: room.currentPlayerIndex,
+          lastBidderIndex: room.lastBidderIndex
+        };
+        
         cleanupPlayerDisconnect(socket, room, playerIndex);
+        
+        // If it was the disconnected player's turn, ensure game state is maintained
+        if (room.gameState === 'playing' && gameState.currentPlayerIndex === playerIndex) {
+          // Update all clients with current game state
+          io.to(roomCode).emit('roomUpdate', {
+            players: room.players,
+            gameState: room.gameState,
+            currentPlayerIndex: room.currentPlayerIndex,
+            currentBid: room.currentBid
+          });
+        }
         break;
       }
     }
@@ -327,7 +350,8 @@ io.on('connection', (socket) => {
         dice: [],
         diceCount: TOTAL_DICE,
         isHuman: true,
-        connected: true
+        connected: true,
+        eliminated: false
       };
       const room = {
         code: roomCode,
@@ -368,8 +392,9 @@ io.on('connection', (socket) => {
         }
 
         // Update player's connection state and socket ID
-        room.players[playerIndex].id = socket.id;
-        room.players[playerIndex].connected = true;
+        const player = room.players[playerIndex];
+        player.id = socket.id;
+        player.connected = true;
         room.lastActive = null;
 
         // Update player mappings
@@ -379,20 +404,37 @@ io.on('connection', (socket) => {
         socket.join(roomCode);
         console.log(`Player ${playerName} reconnected to room ${roomCode}`);
 
-        io.to(roomCode).emit('playerRejoined', {
+        // If it's this player's turn and they're reconnecting, ensure they keep their turn
+        if (room.gameState === 'playing' && room.currentPlayerIndex === playerIndex) {
+          console.log(`Reconnected player ${playerName} is the current player and maintains their turn`);
+        }
+
+        io.to(roomCode).emit('playerReconnected', {
           playerName,
-          playerIndex
+          playerIndex,
+          currentPlayerIndex: room.currentPlayerIndex,
+          currentBid: room.currentBid,
+          gameState: room.gameState
         });
 
+        // Send complete game state to reconnecting player
         callback({
           success: true,
           players: room.players,
           gameState: room.gameState,
           currentPlayerIndex: room.currentPlayerIndex,
-          currentBid: room.currentBid
+          currentBid: room.currentBid,
+          dice: player.dice // Send player's dice back to them
         });
 
-        io.to(roomCode).emit('roomUpdate', { players: room.players });
+        // Update all clients with latest room state
+        io.to(roomCode).emit('roomUpdate', {
+          players: room.players,
+          gameState: room.gameState,
+          currentPlayerIndex: room.currentPlayerIndex,
+          currentBid: room.currentBid
+        });
+        
         logRooms();
       } else {
         console.log(`Failed to reconnect ${playerName}: player not found in room ${roomCode}`);
@@ -431,14 +473,21 @@ io.on('connection', (socket) => {
           dice: [],
           diceCount: TOTAL_DICE,
           isHuman: true,
-          connected: true
+          connected: true,
+          eliminated: false
         };
         room.players.push(newPlayer);
         playerRooms.set(playerName, roomCode);
         playerSockets.set(playerName, socket.id);
         socket.join(roomCode);
         console.log(`Player ${playerName} joined room ${roomCode}. Total players: ${room.players.length}`);
+        
+        // First emit playerJoined for the log entry
         io.to(roomCode).emit('playerJoined', newPlayer);
+        
+        // Then immediately emit roomUpdate to sync all clients with complete player list
+        io.to(roomCode).emit('roomUpdate', { players: room.players });
+        
         callback({ success: true, playerId: socket.id, players: room.players });
         logRooms();
       } else {
@@ -557,8 +606,22 @@ io.on('connection', (socket) => {
       }
 
       const currentBid = room.currentBid;
-      const totalValue = room.players.flatMap(player => player.dice)
-        .filter(die => die === currentBid.value || die === 1).length;
+      
+      // Check if it's an endgame scenario (both players have 1 die)
+      const isEndGame = room.players.every(player => player.diceCount === 1);
+      
+      let totalValue;
+      if (isEndGame) {
+        // In endgame, sum the dice values
+        totalValue = room.players.reduce((sum, player) => {
+          return sum + (player.dice[0] || 0);
+        }, 0);
+        console.log('Endgame sum:', totalValue);
+      } else {
+        // Normal game - count matching dice
+        totalValue = room.players.flatMap(player => player.dice)
+          .filter(die => die === currentBid.value || die === 1).length;
+      }
 
       // Use the stored lastBidderIndex to identify who made the last bid
       const bidderIndex = room.lastBidderIndex;
@@ -568,24 +631,41 @@ io.on('connection', (socket) => {
 
       let loserIndex;
       let challengeOutcome;
-      if (totalValue < currentBid.quantity) {
-        loserIndex = bidderIndex;
-        challengeOutcome = 'succeeded';
+      
+      if (isEndGame) {
+        // In endgame, challenge succeeds if the actual sum is less than the bid
+        if (totalValue <= currentBid.value) {
+          loserIndex = bidderIndex; // Bidder loses if they bid too high
+          challengeOutcome = 'succeeded';
+        } else {
+          loserIndex = challengerIndex; // Challenger loses if the sum is >= bid
+          challengeOutcome = 'failed';
+        }
       } else {
-        loserIndex = challengerIndex;
-        challengeOutcome = 'failed';
+        // Normal game logic
+        if (totalValue < currentBid.quantity) {
+          loserIndex = bidderIndex;
+          challengeOutcome = 'succeeded';
+        } else {
+          loserIndex = challengerIndex;
+          challengeOutcome = 'failed';
+        }
       }
 
       // Store the loser's name and current dice count before potentially removing them
       const loserName = room.players[loserIndex].name;
+      
+      // Update diceCount for the loser
       room.players[loserIndex].diceCount--;
 
       console.log(`Challenge in room ${roomCode}:`);
       console.log(`- Challenger: ${room.players[challengerIndex].name}`);
       console.log(`- Bidder: ${room.players[bidderIndex].name}`);
-      console.log(`- Actual count: ${totalValue}`);
+      console.log(`- Actual count/sum: ${totalValue}`);
       console.log(`- Challenge ${challengeOutcome}`);
       console.log(`- Loser: ${loserName}`);
+      console.log(`- Loser's new dice count: ${room.players[loserIndex].diceCount}`);
+      console.log(`- Loser's new dice array: ${JSON.stringify(room.players[loserIndex].dice)}`);
 
       const challengeResult = {
         challengerName: room.players[challengerIndex].name,
@@ -611,18 +691,20 @@ io.on('connection', (socket) => {
       // Remove player if they lost their last die
       if (willBeEliminated) {
         console.log(`Player ${loserName} eliminated from room ${roomCode}`);
-        playerRooms.delete(loserName);
-        playerSockets.delete(loserName);
-        room.players.splice(loserIndex, 1);
+        room.players[loserIndex].eliminated = true;
+        room.players[loserIndex].diceCount = 0;
+        room.players[loserIndex].dice = [];
       }
 
       // Check for game over
       const connectedPlayers = room.players.filter(p => p.connected);
-      if (room.players.length <= 1 || connectedPlayers.length <= 1) {
+      const activePlayers = room.players.filter(p => p.connected && !p.eliminated);
+
+      if (activePlayers.length <= 1) {
         room.gameState = 'gameOver';
-        // Find the winner - prefer connected players
-        const winner = connectedPlayers.length > 0 ?
-          connectedPlayers[0] :
+        // Find the winner - the last active player
+        const winner = activePlayers[0] ||
+          connectedPlayers[0] ||
           room.players[0];
 
         console.log(`Game over in room ${roomCode}. Winner: ${winner.name}`);
@@ -632,13 +714,6 @@ io.on('connection', (socket) => {
             'Other players disconnected' :
             `${winner.name} wins!`
         });
-
-        // Clean up room mappings after game over
-        room.players.forEach(player => {
-          playerRooms.delete(player.name);
-          playerSockets.delete(player.name);
-        });
-        rooms.delete(roomCode);
       } else {
         // Start new round
         room.currentBid = null;
@@ -646,7 +721,9 @@ io.on('connection', (socket) => {
 
         // Roll new dice for all players
         room.players.forEach(player => {
-          player.dice = rollDice(player.diceCount);
+          if (!player.eliminated) {
+            player.dice = rollDice(player.diceCount);
+          }
         });
 
         // Always set the loser as the first player of the next round
@@ -684,44 +761,51 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('resetGame', ({ roomCode, players }, callback) => {
-    console.log(`Received resetGame event for room ${roomCode}`);
-
+  socket.on('resetGame', ({ roomCode }, callback) => {
     try {
       const room = rooms.get(roomCode);
       if (!room) {
         throw new Error('Room not found');
       }
 
-      room.players = players;
-      room.currentPlayerIndex = 0;
+      // Reset game state
       room.currentBid = null;
       room.lastBidderIndex = null;
       room.gameState = 'playing';
-
-      rooms.set(roomCode, room);
-
-      console.log(`Game reset in room ${roomCode}`);
-      console.log(`- Players: ${players.length}`);
-      console.log(`- First player: ${players[0].name}`);
-
-      io.to(roomCode).emit('gameReset', {
-        players: room.players,
-        currentPlayerIndex: 0,
-        gameStatus: 'playing'
+      
+      // Reset all players' dice and eliminated status
+      room.players.forEach(player => {
+        player.diceCount = TOTAL_DICE;
+        player.dice = rollDice(TOTAL_DICE);
+        player.eliminated = false;  // Reset eliminated status
       });
 
+      // Randomly select first player from connected players
+      do {
+        room.currentPlayerIndex = Math.floor(Math.random() * room.players.length);
+      } while (!room.players[room.currentPlayerIndex].connected);
+
+      console.log(`Game reset in room ${roomCode}`);
+      console.log(`First player: ${room.players[room.currentPlayerIndex].name}`);
+
+      // Reset the game 
+      io.to(roomCode).emit('gameReset', {
+        players: room.players,
+        currentPlayerIndex: room.currentPlayerIndex
+      });
+
+      rooms.set(roomCode, room);
       callback({ success: true });
       logRooms();
     } catch (error) {
-      console.error(`Error resetting game for room ${roomCode}:`, error);
-      callback({ success: false, message: error.message });
+      console.error('Error in resetGame:', error);
+      callback({ success: false, error: error.message });
     }
   });
 });
 
+// Start the server
 const PORT = process.env.PORT || 3002;
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Server running on ${process.env.NODE_ENV === 'production' ? 'https' : 'http'}://localhost:${PORT}`);
 });

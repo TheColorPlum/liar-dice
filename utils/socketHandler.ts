@@ -1,5 +1,20 @@
 import { Socket } from 'socket.io-client';
-import { Player, Bid, ChallengeResult, GameStatus } from '../types/game';
+import { 
+  Player, 
+  Bid, 
+  ChallengeResult, 
+  GameStatus,
+  RoomUpdateData,
+  PlayerJoinedData,
+  PlayerLeftData,
+  PlayerReconnectedData,
+  PlayerDisconnectedData,
+  GameStartedData,
+  BidPlacedData,
+  NewRoundData,
+  GameOverData,
+  GameResetData
+} from '../types/game';
 
 /**
  * Type definitions for socket event callbacks
@@ -8,30 +23,17 @@ interface SocketCallbacks {
   onConnect?: () => void;
   onDisconnect?: (reason: string) => void;
   onError?: (error: string) => void;
-  onGameStarted?: (gameData: { players: Player[]; currentPlayerIndex: number }) => void;
-  onPlayerJoined?: (player: Player) => void;
-  onPlayerLeft?: (data: { playerId: string; nextPlayerIndex: number }) => void;
-  onBidPlaced?: (data: { 
-    bid: Bid;
-    nextPlayerIndex: number;
-    playerName: string;
-    playerId: string;
-  }) => void;
+  onGameStarted?: (gameData: GameStartedData) => void;
+  onPlayerJoined?: (player: PlayerJoinedData) => void;
+  onPlayerLeft?: (data: PlayerLeftData) => void;
+  onBidPlaced?: (data: BidPlacedData) => void;
   onChallengeResult?: (result: ChallengeResult) => void;
-  onNewRound?: (data: {
-    players: Player[];
-    currentPlayerIndex: number;
-    currentBid: Bid | null;
-  }) => void;
-  onGameOver?: (data: { winner: { id: string; name: string }; reason: string }) => void;
-  onRoomUpdate?: (data: { players: Player[] }) => void;
-  onPlayerReconnected?: (data: { playerName: string; playerIndex: number }) => void;
-  onPlayerDisconnected?: (data: { playerName: string; playerIndex: number }) => void;
-  onGameReset?: (gameData: {
-    players: Player[];
-    currentPlayerIndex: number;
-    gameStatus: GameStatus;
-  }) => void;
+  onNewRound?: (data: NewRoundData) => void;
+  onGameOver?: (data: GameOverData) => void;
+  onRoomUpdate?: (data: RoomUpdateData) => void;
+  onPlayerReconnected?: (data: PlayerReconnectedData) => void;
+  onPlayerDisconnected?: (data: PlayerDisconnectedData) => void;
+  onGameReset?: (data: GameResetData) => void;
 }
 
 /**
@@ -179,8 +181,8 @@ export class SocketHandler {
       this.callbacks.onRoomUpdate?.(data);
     });
 
-    this.socket.on('playerRejoined', (data) => {
-      console.log('Player rejoined event received', data);
+    this.socket.on('playerReconnected', (data) => {
+      console.log('Player reconnected event received', data);
       this.callbacks.onPlayerReconnected?.(data);
     });
 

@@ -8,6 +8,7 @@ export interface Player {
   diceCount: number;
   isHuman: boolean;
   connected: boolean;
+  eliminated: boolean;
 }
 
 /**
@@ -61,3 +62,74 @@ export const GAME_CONSTANTS = {
   MIN_BID_VALUE: 2,
   MAX_END_GAME_BID: 12
 } as const;
+
+/**
+ * Socket event data interfaces
+ */
+
+export interface RoomUpdateData {
+  players: Player[];
+  gameState?: GameStatus;
+  currentPlayerIndex?: number;
+  currentBid?: Bid | null;
+}
+
+export interface PlayerJoinedData {
+  name: string;
+  id: string;
+}
+
+export interface PlayerLeftData {
+  playerId: string;
+  playerName: string;
+  nextPlayerIndex: number;
+}
+
+export interface PlayerReconnectedData {
+  playerName: string;
+  playerIndex: number;
+  currentPlayerIndex?: number;
+  currentBid?: Bid | null;
+  gameState?: GameStatus;
+}
+
+export interface PlayerDisconnectedData {
+  playerName: string;
+  playerIndex: number;
+  reconnectGracePeriod: number;
+}
+
+export interface GameStartedData {
+  players: Player[];
+  currentPlayerIndex: number;
+}
+
+export interface BidPlacedData {
+  bid: Bid;
+  nextPlayerIndex: number;
+  playerName: string;
+  playerId: string;
+}
+
+export interface NewRoundData {
+  players: Player[];
+  currentPlayerIndex: number;
+  currentBid: Bid | null;
+}
+
+export interface Winner {
+  id: string;
+  name: string;
+  isHuman?: boolean; // Optional for single player mode
+}
+
+export interface GameOverData {
+  winner: Winner;
+  reason: string;
+}
+
+export interface GameResetData {
+  players: Player[];
+  currentPlayerIndex: number;
+  gameState: GameStatus;
+}

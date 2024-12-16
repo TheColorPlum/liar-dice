@@ -18,13 +18,15 @@ type WaitingRoomProps = {
   players: string[];
   onStartGame: () => void;
   onCancel: () => void;
+  isHost?: boolean;
 };
 
 const WaitingRoom: React.FC<WaitingRoomProps> = ({ 
   roomCode, 
   players, 
   onStartGame, 
-  onCancel 
+  onCancel,
+  isHost = false
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -123,32 +125,39 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
                 <Clock className="h-4 w-4 animate-pulse" />
                 <span>Waiting for more players to join...</span>
               </div>
-            ) : (
+            ) : isHost ? (
               <div className="flex items-center justify-center space-x-2">
                 <PlayCircle className="h-4 w-4" />
                 <span>Ready to start!</span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center space-x-2">
+                <Clock className="h-4 w-4 animate-pulse" />
+                <span>Waiting for host to start the game...</span>
               </div>
             )}
           </div>
 
           {/* Action Buttons */}
           <div className="space-y-3 pt-4">
-            <Button 
-              onClick={onStartGame}
-              disabled={players.length < 2}
-              className="game-button w-full relative group overflow-hidden"
-            >
-              <span className="relative z-10 flex items-center justify-center gap-2">
-                {players.length < 2 ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : (
-                  <PlayCircle className="h-4 w-4" />
-                )}
-                Start Game
-              </span>
-              <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/10 to-primary/0 
-                transform translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
-            </Button>
+            {isHost && (
+              <Button 
+                onClick={onStartGame}
+                disabled={players.length < 2}
+                className="game-button w-full relative group overflow-hidden"
+              >
+                <span className="relative z-10 flex items-center justify-center gap-2">
+                  {players.length < 2 ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <PlayCircle className="h-4 w-4" />
+                  )}
+                  Start Game
+                </span>
+                <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/10 to-primary/0 
+                  transform translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+              </Button>
+            )}
 
             <Button 
               onClick={onCancel} 

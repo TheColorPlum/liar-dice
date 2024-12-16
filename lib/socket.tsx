@@ -37,13 +37,9 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = 1000;
 let activeRoom: { roomCode: string; playerName: string } | null = null;
 
-// Get stored session for initial connection
-const session = getStoredSession();
-const initialPlayerName = session?.playerName || '';
-
-// Initialize socket with auto-connect enabled and player name in query
+// Initialize socket with auto-connect enabled
 const socket = io(SOCKET_URL, {
-  path: '/socket.io/',  // Explicitly set the path
+  path: '/socket.io/',
   transports: ['websocket', 'polling'],
   reconnection: true,
   reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
@@ -51,15 +47,11 @@ const socket = io(SOCKET_URL, {
   reconnectionDelayMax: 5000,
   timeout: 20000,
   autoConnect: true,
-  forceNew: true,
-  query: {
-    playerName: initialPlayerName
-  }
+  forceNew: true
 });
 
 // Connection monitoring with server ping response
 socket.on('ping_client', () => {
-  console.log('Ping received from server');
   socket.emit('pong_client');
 });
 
@@ -74,23 +66,12 @@ socket.on('connect', () => {
   isReconnecting = false;
   reconnectAttempts = 0;
 
-  // Handle session restoration with timeout
-  const session = getStoredSession();
-  if (session && Date.now() - session.timestamp < 3600000) { // 1 hour expiry
-    console.log('Attempting to restore session:', session);
-    const timeoutId = setTimeout(() => {
-      console.log('Session restoration timed out');
-      clearSession();
-    }, 5000);
-
-    socket.emit('reconnectToRoom', session, (response: any) => {
-      clearTimeout(timeoutId);
+  // Only attempt to restore session if we have an active room
+  if (activeRoom) {
+    console.log('Attempting to restore active room:', activeRoom);
+    socket.emit('reconnectToRoom', activeRoom, (response: any) => {
       if (response.success) {
         console.log('Session restored successfully');
-        activeRoom = {
-          roomCode: session.roomCode,
-          playerName: session.playerName
-        };
       } else {
         console.log('Failed to restore session, clearing');
         clearSession();
@@ -171,22 +152,6 @@ const handleReconnection = () => {
 const socketHandler = new SocketHandler(socket, {
   onConnect: () => {
     console.log('Socket handler connected');
-    if (activeRoom) {
-      console.log('Attempting to restore active room:', activeRoom);
-      socketHandler.reconnectToRoom(activeRoom.roomCode, activeRoom.playerName)
-        .then(response => {
-          console.log('Room restoration response:', response);
-          if (!response.success) {
-            clearSession();
-            activeRoom = null;
-          }
-        })
-        .catch(error => {
-          console.error('Failed to restore room:', error);
-          clearSession();
-          activeRoom = null;
-        });
-    }
   },
   onDisconnect: (reason) => {
     console.log('Socket handler disconnected:', reason);
@@ -228,14 +193,13 @@ const waitForConnection = async (timeout = 5000): Promise<void> => {
     socket.once('connect', connectHandler);
     socket.once('connect_error', errorHandler);
 
-    socket.connect(); // Always try to connect
+    socket.connect();
   });
 };
 
 // Game action handlers with enhanced error handling and room state management
 export const createRoom = async (playerName: string) => {
   try {
-    // Update socket query with player name
     socket.io.opts.query = { playerName };
     await waitForConnection();
     const result = await socketHandler.createRoom(playerName);
@@ -256,16 +220,47 @@ export const createRoom = async (playerName: string) => {
 
 export const joinRoom = async (roomCode: string, playerName: string) => {
   try {
-    // Update socket query with player name
     socket.io.opts.query = { playerName };
     await waitForConnection();
-    const result = await socketHandler.joinRoom(roomCode, playerName);
-    if (result.success) {
+
+    // Try joining as a new player first
+    const joinResult = await socketHandler.joinRoom(roomCode, playerName);
+    
+    if (joinResult.success) {
       activeRoom = { roomCode, playerName };
       storeSession(roomCode, playerName);
       console.log('Room joined successfully:', activeRoom);
+      return joinResult;
     }
-    return result;
+
+    // If joining fails because player might be disconnected, try reconnecting
+    if (joinResult.message?.includes('already have an active room')) {
+      console.log('Attempting reconnection for existing player');
+      const reconnectResult = await socketHandler.reconnectToRoom(roomCode, playerName);
+      
+      if (reconnectResult.success) {
+        activeRoom = { roomCode, playerName };
+        storeSession(roomCode, playerName);
+        console.log('Reconnection successful:', reconnectResult);
+        // Return a properly formatted response that matches the joinRoom response structure
+        return {
+          success: true,
+          playerId: socket.id,
+          players: reconnectResult.players,
+          gameState: reconnectResult.gameState,
+          currentPlayerIndex: reconnectResult.currentPlayerIndex,
+          currentBid: reconnectResult.currentBid
+        };
+      }
+      
+      // If reconnection fails, return a more specific error
+      return {
+        success: false,
+        message: reconnectResult.error || 'Failed to reconnect to room'
+      };
+    }
+
+    return joinResult;
   } catch (error: any) {
     console.error('Join room failed:', error);
     return { 
