@@ -691,26 +691,23 @@ io.on('connection', (socket) => {
       // Remove player if they lost their last die
       if (willBeEliminated) {
         console.log(`Player ${loserName} eliminated from room ${roomCode}`);
-        room.players[loserIndex].eliminated = true;
-        room.players[loserIndex].diceCount = 0;
-        room.players[loserIndex].dice = [];
+        // Remove the eliminated player from the array
+        room.players.splice(loserIndex, 1);
+        console.log(`Player ${loserName} removed from players array`);
       }
 
       // Check for game over
-      const connectedPlayers = room.players.filter(p => p.connected);
-      const activePlayers = room.players.filter(p => p.connected && !p.eliminated);
+      const remainingPlayers = room.players.filter(p => p.connected);
 
-      if (activePlayers.length <= 1) {
+      if (remainingPlayers.length <= 1) {
         room.gameState = 'gameOver';
-        // Find the winner - the last active player
-        const winner = activePlayers[0] ||
-          connectedPlayers[0] ||
-          room.players[0];
+        // Find the winner - the last remaining player
+        const winner = remainingPlayers[0] || room.players[0];
 
         console.log(`Game over in room ${roomCode}. Winner: ${winner.name}`);
         io.to(roomCode).emit('gameOver', {
           winner,
-          reason: connectedPlayers.length <= 1 ?
+          reason: remainingPlayers.length <= 1 ?
             'Other players disconnected' :
             `${winner.name} wins!`
         });
@@ -726,20 +723,13 @@ io.on('connection', (socket) => {
           }
         });
 
-        // Always set the loser as the first player of the next round
-        // If they were eliminated, use the next available player after their position
+        // Set the next player index based on challenge outcome
         if (willBeEliminated) {
-          room.currentPlayerIndex = loserIndex % room.players.length;
-          // Ensure the selected player is connected
-          if (!room.players[room.currentPlayerIndex]?.connected) {
-            room.currentPlayerIndex = getNextConnectedPlayerIndex(room, room.currentPlayerIndex);
-          }
+          // If player was eliminated, next player should be the one after their position
+          room.currentPlayerIndex = getNextConnectedPlayerIndex(room, loserIndex - 1);
         } else {
+          // If no elimination, loser of the challenge goes first
           room.currentPlayerIndex = loserIndex;
-          // If the loser is disconnected, move to the next connected player
-          if (!room.players[room.currentPlayerIndex]?.connected) {
-            room.currentPlayerIndex = getNextConnectedPlayerIndex(room, room.currentPlayerIndex);
-          }
         }
 
         console.log(`Starting new round in room ${roomCode}`);

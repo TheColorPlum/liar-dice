@@ -123,15 +123,8 @@ export const useSocketEvents = () => {
         onBidPlaced: (data: BidPlacedData) => {
           dispatch({ type: 'SET_CURRENT_BID', payload: data.bid });
           
-          // Find next player with dice
-          let nextIndex = data.nextPlayerIndex;
-          const activePlayers = state.players.filter(p => p.diceCount > 0 && p.connected);
-          const nextPlayerWithDice = activePlayers.findIndex(p => p.id === state.players[nextIndex].id);
-          if (nextPlayerWithDice !== -1) {
-            nextIndex = state.players.findIndex(p => p.id === activePlayers[nextPlayerWithDice].id);
-          }
-          
-          dispatch({ type: 'SET_CURRENT_PLAYER_INDEX', payload: nextIndex });
+          // Use the server's nextPlayerIndex directly
+          dispatch({ type: 'SET_CURRENT_PLAYER_INDEX', payload: data.nextPlayerIndex });
           
           let actionMessage;
           if (state.isEndGame) {
@@ -158,7 +151,10 @@ export const useSocketEvents = () => {
           
           dispatch({ type: 'SET_LAST_ACTION', payload: actionMessage });
           dispatch({ type: 'ADD_LOG_ENTRY', payload: createLogEntry(actionMessage) });
-          dispatch({ type: 'SET_PLAYERS', payload: result.players });
+          
+          // Filter out eliminated players
+          const updatedPlayers = result.players.filter(p => p.diceCount > 0);
+          dispatch({ type: 'SET_PLAYERS', payload: updatedPlayers });
 
           // Add elimination message if player lost their last die
           const loser = result.players[result.loserIndex];
